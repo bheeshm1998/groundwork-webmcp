@@ -1,0 +1,273 @@
+import { useEffect, useRef } from 'react';
+import * as maplibregl from 'maplibre-gl';
+import type { GeoJSONSource, Map as MapLibreMap, MapLayerMouseEvent, Marker } from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+import { MaplibreTerradrawControl } from '@watergis/maplibre-gl-terradraw';
+import '@watergis/maplibre-gl-terradraw/dist/maplibre-gl-terradraw.css';
+import type { Feature, FeatureCollection, Point } from 'geojson';
+import type { AreaGeometry } from '../domain/schemas';
+import { workspaceService } from '../domain/workspace-service';
+import { completePreferenceDraw } from './drawing';
+import { useWorkspaceStore } from '../store/workspace-store';
+import { workspaceSnapshot } from '../store/workspace-store';
+import type { CanonicalWorkspace, DerivedAnalysis } from '../domain/schemas';
+
+maplibregl.setWorkerUrl(workerUrl);
+
+const EMPTY_COLLECTION: FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+function setSourceData(map: MapLibreMap, source: string, data: FeatureCollection | AreaGeometry) {
+  (map.getSource(source) as GeoJSONSource | undefined)?.setData(data);
+}
+
+function getMapStyle(): string {
+  const key = import.meta.env.VITE_MAPTILER_KEY;
+  return key
+    ? `https://api.maptiler.com/maps/streets-v2/style.json?key=${key}`
+    : 'https://tiles.openfreemap.org/styles/bright';
+}
+
+function syncWorkspaceSources(
+  map: MapLibreMap,
+  canonical: CanonicalWorkspace,
+  derived: DerivedAnalysis,
+) {
+  const features: AreaGeometry[] = [];
+  for (const condition of canonical.conditions) {
+    if (!condition.visible) continue;
+    const layer = derived.layers[condition.id];
+    if (layer) {
+      features.push({
+        ...layer,
+        properties: {
+          ...layer.properties,
+          conditionId: condition.id,
+          kind: condition.kind === 'access' ? condition.category : condition.kind,
+        },
+      });
+    }
+  }
+  setSourceData(map, 'groundwork-conditions', { type: 'FeatureCollection', features });
+  setSourceData(map, 'groundwork-feasible', derived.feasibleRegion ?? EMPTY_COLLECTION);
+  const candidateFeatures: Array<Feature<Point>> = derived.candidates.map((candidate, index) => ({
+    type: 'Feature',
+    properties: {
+      candidateId: candidate.id,
+      rank: String(index + 1),
+      selected: canonical.selectedCandidateId === candidate.id,
+    },
+    geometry: { type: 'Point', coordinates: candidate.coordinates },
+  }));
+  setSourceData(map, 'groundwork-candidates', {
+    type: 'FeatureCollection',
+    features: candidateFeatures,
+  });
+}
+
+export function MapView() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const officeMarkerRef = useRef<Marker | null>(null);
+  const drawControlRef = useRef<MaplibreTerradrawControl | null>(null);
+  const canonical = useWorkspaceStore((state) => state.canonical);
+  const office = useWorkspaceStore((state) => state.canonical.office);
+  const derived = useWorkspaceStore((state) => state.derived);
+  const initialViewRef = useRef(canonical.view);
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+    const map = new maplibregl.Map({
+      container: containerRef.current,
+      style: getMapStyle(),
+      center: initialViewRef.current.center,
+      zoom: initialViewRef.current.zoom,
+      bearing: initialViewRef.current.bearing,
+      pitch: initialViewRef.current.pitch,
+      attributionControl: false,
+      maxBounds: [
+        [-122.56, 37.67],
+        [-122.31, 37.85],
+      ],
+    });
+    mapRef.current = map;
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+    map.addControl(
+      new maplibregl.AttributionControl({
+        compact: true,
+        customAttribution: 'Analysis © OpenStreetMap contributors',
+      }),
+      'bottom-right',
+    );
+
+    const drawControl = new MaplibreTerradrawControl({
+      modes: ['render', 'polygon', 'select', 'delete-selection', 'delete'],
+      open: false,
+    });
+    drawControlRef.current = drawControl;
+    map.addControl(drawControl, 'bottom-left');
+
+    map.on('load', () => {
+      map.addSource('groundwork-conditions', { type: 'geojson', data: EMPTY_COLLECTION });
+      map.addLayer({
+        id: 'groundwork-condition-fill',
+        type: 'fill',
+        source: 'groundwork-conditions',
+        paint: {
+          'fill-color': [
+            'match',
+            ['get', 'kind'],
+            'bike',
+            '#29d3d1',
+            'grocery',
+            '#f0a43c',
+            'park',
+            '#5cc47b',
+            '#aa8ff3',
+          ],
+          'fill-opacity': 0.22,
+        },
+      });
+      map.addLayer({
+        id: 'groundwork-condition-line',
+        type: 'line',
+        source: 'groundwork-conditions',
+        paint: {
+          'line-color': [
+            'match',
+            ['get', 'kind'],
+            'bike',
+            '#29d3d1',
+            'grocery',
+            '#f0a43c',
+            'park',
+            '#5cc47b',
+            '#aa8ff3',
+          ],
+          'line-width': 2,
+        },
+      });
+      map.addSource('groundwork-feasible', { type: 'geojson', data: EMPTY_COLLECTION });
+      map.addLayer({
+        id: 'groundwork-feasible-fill',
+        type: 'fill',
+        source: 'groundwork-feasible',
+        paint: { 'fill-color': '#d9ff5a', 'fill-opacity': 0.42 },
+      });
+      map.addLayer({
+        id: 'groundwork-feasible-line',
+        type: 'line',
+        source: 'groundwork-feasible',
+        paint: { 'line-color': '#efffa8', 'line-width': 3, 'line-dasharray': [2, 1] },
+      });
+      map.addSource('groundwork-candidates', { type: 'geojson', data: EMPTY_COLLECTION });
+      map.addLayer({
+        id: 'groundwork-candidate-points',
+        type: 'circle',
+        source: 'groundwork-candidates',
+        paint: {
+          'circle-radius': ['case', ['boolean', ['get', 'selected'], false], 13, 10],
+          'circle-color': ['case', ['boolean', ['get', 'selected'], false], '#d9ff5a', '#102d2b'],
+          'circle-stroke-color': '#f5ffe1',
+          'circle-stroke-width': 3,
+        },
+      });
+      map.addLayer({
+        id: 'groundwork-candidate-labels',
+        type: 'symbol',
+        source: 'groundwork-candidates',
+        layout: { 'text-field': ['get', 'rank'], 'text-size': 12, 'text-font': ['Noto Sans Bold'] },
+        paint: {
+          'text-color': ['case', ['boolean', ['get', 'selected'], false], '#102d2b', '#f5ffe1'],
+        },
+      });
+      map.on('click', 'groundwork-candidate-points', (event: MapLayerMouseEvent) => {
+        const candidateId = event.features?.[0]?.properties?.candidateId as string | undefined;
+        if (candidateId)
+          void workspaceService.execute({ type: 'select-candidate', id: candidateId });
+      });
+      const current = workspaceSnapshot();
+      syncWorkspaceSources(map, current.canonical, current.derived);
+    });
+
+    const onMoveEnd = () => {
+      const center = map.getCenter();
+      void workspaceService.execute({
+        type: 'set-view',
+        view: {
+          center: [center.lng, center.lat],
+          zoom: map.getZoom(),
+          bearing: map.getBearing(),
+          pitch: map.getPitch(),
+        },
+      });
+    };
+    map.on('moveend', onMoveEnd);
+
+    const onStartDraw = () => {
+      const draw = drawControl.getTerraDrawInstance();
+      if (!draw) return;
+      draw.clear();
+      draw.setMode('polygon');
+    };
+    window.addEventListener('groundwork:start-draw', onStartDraw);
+
+    const draw = drawControl.getTerraDrawInstance();
+    const onFinish = (featureId: string | number) => {
+      const feature = draw?.getSnapshotFeature(featureId);
+      if (!feature || feature.geometry.type !== 'Polygon') return;
+      const geometry = {
+        type: 'Feature',
+        properties: {},
+        geometry: feature.geometry,
+      } as AreaGeometry;
+      draw?.setMode('select');
+      completePreferenceDraw(geometry);
+      void workspaceService.execute({ type: 'add-preference', geometry });
+    };
+    draw?.on('finish', onFinish);
+
+    return () => {
+      draw?.off('finish', onFinish);
+      window.removeEventListener('groundwork:start-draw', onStartDraw);
+      map.off('moveend', onMoveEnd);
+      officeMarkerRef.current?.remove();
+      map.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.isStyleLoaded()) return;
+    syncWorkspaceSources(map, canonical, derived);
+  }, [canonical, derived]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    officeMarkerRef.current?.remove();
+    officeMarkerRef.current = null;
+    if (!office) return;
+    const marker = new maplibregl.Marker({ color: '#ff7657', draggable: true })
+      .setLngLat(office.coordinates)
+      .setPopup(new maplibregl.Popup({ offset: 24 }).setText(office.label))
+      .addTo(map);
+    marker.on('dragend', () => {
+      const location = marker.getLngLat();
+      void workspaceService.execute({
+        type: 'set-office',
+        office: { label: 'Moved office marker', coordinates: [location.lng, location.lat] },
+      });
+    });
+    officeMarkerRef.current = marker;
+  }, [office]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="map-canvas"
+      aria-label="Interactive San Francisco analysis map"
+    />
+  );
+}

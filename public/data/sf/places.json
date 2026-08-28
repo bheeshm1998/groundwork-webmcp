@@ -1,0 +1,25 @@
+{
+  "groceries": [
+    { "id": "g1", "name": "Market Street Supermarket", "coordinates": [-122.4075, 37.7845], "type": "supermarket" },
+    { "id": "g2", "name": "Mission Community Market", "coordinates": [-122.4198, 37.7598], "type": "grocery" },
+    { "id": "g3", "name": "Castro Supermarket", "coordinates": [-122.4346, 37.7617], "type": "supermarket" },
+    { "id": "g4", "name": "Richmond Supermarket", "coordinates": [-122.4665, 37.7807], "type": "supermarket" },
+    { "id": "g5", "name": "Noe Valley Grocery", "coordinates": [-122.4311, 37.7504], "type": "grocery" },
+    { "id": "g6", "name": "SoMa Supermarket", "coordinates": [-122.3972, 37.778], "type": "supermarket" },
+    { "id": "g7", "name": "Marina Supermarket", "coordinates": [-122.4374, 37.8006], "type": "supermarket" },
+    { "id": "g8", "name": "Sunset Grocery", "coordinates": [-122.4827, 37.7567], "type": "grocery" }
+  ],
+  "parks": [
+    { "id": "p1", "name": "Dolores Park", "coordinates": [-122.426, 37.7596] },
+    { "id": "p2", "name": "Alamo Square", "coordinates": [-122.4346, 37.7764] },
+    { "id": "p3", "name": "Golden Gate Park", "coordinates": [-122.4662, 37.7694] },
+    { "id": "p4", "name": "Yerba Buena Gardens", "coordinates": [-122.4026, 37.7852] },
+    { "id": "p5", "name": "Presidio Meadow", "coordinates": [-122.455, 37.7989] },
+    { "id": "p6", "name": "Bernal Heights Park", "coordinates": [-122.414, 37.7431] }
+  ],
+  "presets": [
+    { "id": "market-1", "label": "1 Market Street, San Francisco", "coordinates": [-122.3949, 37.7936] },
+    { "id": "mission-16", "label": "16th Street BART, San Francisco", "coordinates": [-122.4197, 37.765] },
+    { "id": "city-hall", "label": "San Francisco City Hall", "coordinates": [-122.4193, 37.7793] }
+  ]
+}

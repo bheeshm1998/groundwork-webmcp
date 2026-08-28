@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+package-lock.json
+PRODUCT_SCOPE.md
+GROUNDWORK_PLAN_v2.md
+public/data/sf/

@@ -1,0 +1,41 @@
+import { describe, expect, it } from 'vitest';
+import { dijkstra, loadGraph, nearestNode, type SerializedAdjacencyGraph } from './graph';
+
+const graphFixture: SerializedAdjacencyGraph = {
+  format: 'adjacency-v1',
+  nodes: [
+    [-122.4, 37.77],
+    [-122.39, 37.77],
+    [-122.38, 37.77],
+  ],
+  offsets: [0, 1, 2, 2],
+  targets: [1, 2],
+  weights: [4, 4],
+};
+
+describe('road graph', () => {
+  it('respects direction and cutoff time', () => {
+    const graph = loadGraph(graphFixture);
+    const forward = dijkstra(graph, 0, 5);
+    expect(forward[0]).toBe(0);
+    expect(forward[1]).toBe(4);
+    expect(forward[2]).toBe(Number.POSITIVE_INFINITY);
+
+    const reverse = dijkstra(graph, 2, 20);
+    expect(reverse[0]).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('expands monotonically as the time limit increases', () => {
+    const graph = loadGraph(graphFixture);
+    const short = dijkstra(graph, 0, 5);
+    const long = dijkstra(graph, 0, 10);
+    const shortReach = [...short].filter(Number.isFinite).length;
+    const longReach = [...long].filter(Number.isFinite).length;
+    expect(longReach).toBeGreaterThan(shortReach);
+  });
+
+  it('snaps to the nearest graph node', () => {
+    const graph = loadGraph(graphFixture);
+    expect(nearestNode(graph, [-122.389, 37.7701])).toBe(1);
+  });
+});

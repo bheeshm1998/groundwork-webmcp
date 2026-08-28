@@ -1,0 +1,9 @@
+{
+  "source": "Geofabrik California OpenStreetMap extract",
+  "downloadPage": "https://download.geofabrik.de/north-america/us/california.html",
+  "pbfPathEnvironmentVariable": "OSM_PBF_PATH",
+  "requiredTool": "osmium-tool",
+  "license": "ODbL 1.0",
+  "note": "Pin the downloaded file and record its SHA-256 below before regenerating production assets.",
+  "sha256": ""
+}

@@ -1,0 +1,10 @@
+{
+  "datasetVersion": "sf-demo-2026-08-27",
+  "generatedAt": "2026-08-27T00:00:00.000Z",
+  "coverage": "San Francisco, California",
+  "source": "OpenStreetMap-compatible demo extract",
+  "license": "ODbL 1.0",
+  "attribution": "© OpenStreetMap contributors",
+  "graphFormat": "compact-grid-v1",
+  "analysisNote": "The committed compact graph keeps the static demo immediately runnable. Run npm run data:build with a pinned PBF and osmium-tool to replace it with a production OSM extract."
+}
