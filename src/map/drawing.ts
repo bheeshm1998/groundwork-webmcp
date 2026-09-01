@@ -28,6 +28,7 @@ export function completePreferenceDraw(geometry: AreaGeometry): void {
   pending?.cleanup?.();
   pending?.resolve(geometry);
   pending = undefined;
+  useWorkspaceStore.getState().commit({ operation: 'idle' });
 }
 
 export function cancelPreferenceDraw(message = 'Drawing was cancelled.'): void {
@@ -35,4 +36,5 @@ export function cancelPreferenceDraw(message = 'Drawing was cancelled.'): void {
   pending?.reject(new Error(message));
   pending = undefined;
   useWorkspaceStore.getState().commit({ operation: 'idle' });
+  window.dispatchEvent(new CustomEvent('groundwork:cancel-draw'));
 }

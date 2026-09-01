@@ -1,0 +1,123 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - link "Groundwork home" [ref=e5] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e6]: G
+      - generic [ref=e7]: Groundwork
+    - generic [ref=e8]:
+      - generic "Uses the bundled synthetic hackathon dataset" [ref=e9]: Demo data
+      - text: Manual mode
+  - generic [ref=e11]:
+    - complementary [ref=e12]:
+      - region [ref=e84]:
+        - generic [ref=e14]: Decision setup
+        - heading "Office selected" [level=1] [ref=e85]
+        - generic [ref=e86]:
+          - generic [ref=e87]: ◆
+          - text: 1 Market Street, San Francisco
+        - button "Change office or sample" [ref=e88] [cursor=pointer]
+      - region [ref=e23]:
+        - generic [ref=e24]:
+          - generic [ref=e25]:
+            - generic [ref=e26]: Visible reasoning
+            - heading "Conditions" [level=2] [ref=e27]
+          - generic [ref=e28]: not combined
+        - generic [ref=e29]:
+          - generic [ref=e30]:
+            - text: Bike
+            - spinbutton "Bike" [ref=e31]: "25"
+          - button "Set bike" [disabled] [ref=e32]
+          - generic [ref=e33]:
+            - text: Grocery
+            - spinbutton "Grocery" [ref=e34]: "10"
+          - button "Set grocery" [disabled] [ref=e35]
+          - generic [ref=e36]:
+            - text: Park
+            - spinbutton "Park" [ref=e37]: "8"
+          - button "Set park" [disabled] [ref=e38]
+        - list [ref=e89]:
+          - listitem [ref=e90]:
+            - button "Hide 25-minute bicycle area" [disabled] [ref=e91]
+            - generic [ref=e92]: 25-minute bicycle area
+            - spinbutton "Minutes for 25-minute bicycle area" [disabled] [ref=e93]: "25"
+            - button "Delete 25-minute bicycle area" [disabled] [ref=e94]: ×
+          - listitem [ref=e95]:
+            - button "Hide 10-minute grocery access" [disabled] [ref=e96]
+            - generic [ref=e97]: 10-minute grocery access
+            - spinbutton "Minutes for 10-minute grocery access" [disabled] [ref=e98]: "10"
+            - button "Delete 10-minute grocery access" [disabled] [ref=e99]: ×
+          - listitem [ref=e100]:
+            - button "Hide 8-minute park access" [disabled] [ref=e101]
+            - generic [ref=e102]: 8-minute park access
+            - spinbutton "Minutes for 8-minute park access" [disabled] [ref=e103]: "8"
+            - button "Delete 8-minute park access" [disabled] [ref=e104]: ×
+        - generic [ref=e39]:
+          - button "Draw preference" [disabled] [ref=e40]
+          - button "Combine" [disabled] [ref=e41]
+        - paragraph [ref=e42]: Walking access uses straight-line distance at 1.4 m/s. Bicycle times are modeled estimates.
+    - generic [ref=e43]:
+      - generic "Interactive San Francisco analysis map" [ref=e67]:
+        - generic:
+          - region "Map" [ref=e68]
+          - button "Map marker" [ref=e105]
+        - generic:
+          - button "Expand or collapse drawing tool" [ref=e70] [cursor=pointer]
+          - generic:
+            - group [ref=e71]:
+              - generic "Toggle attribution" [ref=e72] [cursor=pointer]
+              - generic [ref=e73]:
+                - text: Synthetic demo analysis · Map © OpenStreetMap contributors |
+                - link "OpenFreeMap" [ref=e74] [cursor=pointer]:
+                  - /url: https://openfreemap.org
+                - link "© OpenMapTiles" [ref=e75] [cursor=pointer]:
+                  - /url: https://www.openmaptiles.org/
+                - text: Data from
+                - link "OpenStreetMap" [ref=e76] [cursor=pointer]:
+                  - /url: https://www.openstreetmap.org/copyright
+            - generic [ref=e77]:
+              - button "Zoom in" [ref=e78] [cursor=pointer]
+              - button "Zoom out" [ref=e80] [cursor=pointer]
+              - button "Drag to rotate map, click to reset north" [ref=e82]
+      - status [ref=e124]: Calculating on this device…
+    - complementary [ref=e46]:
+      - region [ref=e47]:
+        - generic [ref=e48]:
+          - generic [ref=e49]:
+            - generic [ref=e50]: Calculated result
+            - heading "Matching area" [level=2] [ref=e51]
+          - strong [ref=e52]: 0.00 km²
+        - paragraph [ref=e53]: Combine at least two conditions to reveal the overlap.
+      - region [ref=e54]:
+        - generic [ref=e55]:
+          - heading "Activity" [level=2] [ref=e56]
+          - generic [ref=e57]: Manual workspace history
+        - list [ref=e125]:
+          - listitem [ref=e126]:
+            - generic [ref=e127]:
+              - text: user
+              - time [ref=e128]: 00:52
+            - text: Added 8-minute park access.
+          - listitem [ref=e129]:
+            - generic [ref=e130]:
+              - text: user
+              - time [ref=e131]: 00:52
+            - text: Added 10-minute grocery access.
+          - listitem [ref=e132]:
+            - generic [ref=e133]:
+              - text: user
+              - time [ref=e134]: 00:52
+            - text: Created a 25-minute bicycle area.
+          - listitem [ref=e135]:
+            - generic [ref=e136]:
+              - text: user
+              - time [ref=e137]: 00:52
+            - text: Set the office to 1 Market Street, San Francisco.
+          - listitem [ref=e138]:
+            - generic [ref=e139]:
+              - text: user
+              - time [ref=e140]: 00:52
+            - text: Reset the workspace.
+        - generic [ref=e59]:
+          - button "Undo last change" [disabled] [ref=e60]
+          - button "Share workspace" [disabled] [ref=e61]
+          - button "Reset" [disabled] [ref=e62]

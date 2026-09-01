@@ -6,6 +6,7 @@ import { ResultsPanel } from './ResultsPanel';
 import { workspaceService } from '../domain/workspace-service';
 import { useWorkspaceStore } from '../store/workspace-store';
 import { WebMCPBridge } from '../webmcp/WebMCPBridge';
+import { cancelPreferenceDraw } from '../map/drawing';
 
 const MapView = lazy(() =>
   import('../map/MapView').then((module) => ({ default: module.MapView })),
@@ -29,6 +30,9 @@ export function App() {
           <span>Groundwork</span>
         </a>
         <div className="topbar-status">
+          <span className="demo-badge" title="Uses the bundled synthetic hackathon dataset">
+            Demo data
+          </span>
           <span className={`status-dot ${document.modelContext ? 'connected' : ''}`} />
           {document.modelContext ? 'WebMCP connected' : 'Manual mode'}
         </div>
@@ -49,7 +53,10 @@ export function App() {
           ) : null}
           {operation === 'drawing' ? (
             <div className="drawing-pill" role="status">
-              Click to draw a boundary. Double-click to finish.
+              <span>Click to draw a boundary. Double-click to finish.</span>
+              <button type="button" onClick={() => cancelPreferenceDraw()}>
+                Cancel
+              </button>
             </div>
           ) : null}
         </section>

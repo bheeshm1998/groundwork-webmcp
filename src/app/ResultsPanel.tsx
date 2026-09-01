@@ -5,9 +5,16 @@ function minutes(value: number | null) {
   return value === null ? '—' : `${Math.round(value)}m`;
 }
 
+function areaLabel(value: number) {
+  if (value > 0 && value < 0.01) return '<0.01 km²';
+  return `${value.toFixed(2)} km²`;
+}
+
 export function ResultsPanel() {
   const derived = useWorkspaceStore((state) => state.derived);
   const selectedId = useWorkspaceStore((state) => state.canonical.selectedCandidateId);
+  const operation = useWorkspaceStore((state) => state.operation);
+  const mutationsDisabled = operation === 'calculating' || operation === 'drawing';
 
   return (
     <section className="panel results-panel" aria-labelledby="results-heading">
@@ -16,7 +23,7 @@ export function ResultsPanel() {
           <div className="eyebrow">Calculated result</div>
           <h2 id="results-heading">Matching area</h2>
         </div>
-        <strong className="area-stat">{derived.feasibleAreaKm2.toFixed(2)} km²</strong>
+        <strong className="area-stat">{areaLabel(derived.feasibleAreaKm2)}</strong>
       </div>
       {derived.restriction ? (
         <p className="restriction">{derived.restriction.message}</p>
@@ -33,13 +40,19 @@ export function ResultsPanel() {
               <button
                 type="button"
                 className="candidate-main"
+                aria-pressed={selectedId === candidate.id}
+                aria-label={`Select candidate ${index + 1} at ${candidate.coordinates[1].toFixed(3)}, ${candidate.coordinates[0].toFixed(3)}`}
+                disabled={mutationsDisabled}
                 onClick={() =>
                   void workspaceService.execute({ type: 'select-candidate', id: candidate.id })
                 }
               >
                 <span className="candidate-rank">{index + 1}</span>
                 <span>
-                  <strong>Candidate {index + 1}</strong>
+                  <strong>
+                    Area near {candidate.coordinates[1].toFixed(3)},{' '}
+                    {candidate.coordinates[0].toFixed(3)}
+                  </strong>
                   <small>{candidate.tradeoff}</small>
                 </span>
               </button>
@@ -57,9 +70,19 @@ export function ResultsPanel() {
                   <dd>{minutes(candidate.parkMinutes)}</dd>
                 </div>
               </dl>
+              {candidate.comfortable.length > 0 ? (
+                <p className="candidate-detail">
+                  Comfortable margin: {candidate.comfortable.join(', ')}.
+                </p>
+              ) : null}
+              {candidate.closeToFailing ? (
+                <p className="candidate-warning">Tightest edge: {candidate.closeToFailing}.</p>
+              ) : null}
               <button
                 className="remove-candidate"
                 type="button"
+                aria-label={`Remove candidate ${index + 1} from consideration`}
+                disabled={mutationsDisabled}
                 onClick={() =>
                   void workspaceService.execute({ type: 'remove-candidate', id: candidate.id })
                 }
@@ -69,6 +92,11 @@ export function ResultsPanel() {
             </article>
           ))}
         </div>
+      ) : null}
+      {derived.feasibleRegion ? (
+        <p className="assumption-note">
+          Demo result from a synthetic hackathon network; not a real-world travel guarantee.
+        </p>
       ) : null}
     </section>
   );

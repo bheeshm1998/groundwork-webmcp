@@ -1,6 +1,25 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
-test('registers and executes the state-aware WebMCP surface', async ({ page }) => {
+async function executeWebMcpTool(page: Page, name: string, input: Record<string, unknown> = {}) {
+  return page.evaluate(
+    async ({ toolName, toolInput }) => {
+      const tool = (window as any).__groundworkTools.get(toolName);
+      if (!tool) throw new Error(`WebMCP tool is not registered: ${toolName}`);
+      const result = await tool.execute(toolInput, { signal: new AbortController().signal });
+      const dataTools = new Set([
+        'groundwork_search_locations',
+        'groundwork_get_workspace',
+        'groundwork_explain_candidate',
+        'groundwork_analyze_restriction',
+      ]);
+      return dataTools.has(toolName) ? result : { ok: result.ok, message: result.message };
+    },
+    { toolName: name, toolInput: input },
+  );
+}
+
+test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) => {
+  test.setTimeout(90_000);
   await page.addInitScript(() => {
     const tools = new Map<
       string,
@@ -32,10 +51,80 @@ test('registers and executes the state-aware WebMCP surface', async ({ page }) =
       page.evaluate(() => (window as any).__groundworkTools.has('groundwork_get_workspace')),
     )
     .toBe(true);
-  const result = await page.evaluate(async () => {
-    const tool = (window as any).__groundworkTools.get('groundwork_get_workspace');
-    return tool.execute({}, { signal: new AbortController().signal });
+
+  const search = await executeWebMcpTool(page, 'groundwork_search_locations', {
+    query: '1 Market',
   });
-  expect(result.ok).toBe(true);
-  expect(result.data.freshness).toBe('not-combined');
+  expect(search).toMatchObject({
+    ok: true,
+    data: [
+      {
+        label: '1 Market Street, San Francisco',
+        coordinates: [-122.3949, 37.7936],
+      },
+    ],
+  });
+
+  await executeWebMcpTool(page, 'groundwork_set_office', {
+    label: '1 Market Street, San Francisco',
+    longitude: -122.3949,
+    latitude: 37.7936,
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__groundworkTools.has('groundwork_add_bike_condition')),
+    )
+    .toBe(true);
+
+  await executeWebMcpTool(page, 'groundwork_add_bike_condition', { maxMinutes: 25 });
+  await executeWebMcpTool(page, 'groundwork_add_access_condition', {
+    category: 'grocery',
+    maxMinutes: 10,
+    groceryType: 'supermarket',
+  });
+  await executeWebMcpTool(page, 'groundwork_add_access_condition', {
+    category: 'park',
+    maxMinutes: 8,
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__groundworkTools.has('groundwork_combine_conditions')),
+    )
+    .toBe(true);
+
+  await executeWebMcpTool(page, 'groundwork_combine_conditions');
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__groundworkTools.has('groundwork_rank_candidates')),
+    )
+    .toBe(true);
+  await executeWebMcpTool(page, 'groundwork_rank_candidates');
+
+  const workspace = await executeWebMcpTool(page, 'groundwork_get_workspace');
+  expect(workspace).toMatchObject({
+    ok: true,
+    data: {
+      freshness: 'fresh',
+      office: { label: '1 Market Street, San Francisco' },
+    },
+  });
+  expect((workspace as any).data.conditions).toHaveLength(3);
+  expect((workspace as any).data.candidates).toHaveLength(3);
+  expect((workspace as any).data.feasibleAreaKm2).toBeGreaterThan(0);
+
+  const candidate = (workspace as any).data.candidates[0];
+  const explanation = await executeWebMcpTool(page, 'groundwork_explain_candidate', {
+    id: candidate.id,
+  });
+  expect(explanation).toMatchObject({ ok: true, data: { id: candidate.id } });
+
+  const restriction = await executeWebMcpTool(page, 'groundwork_analyze_restriction');
+  expect(restriction).toMatchObject({ ok: true });
+  expect((restriction as any).data.areaLostKm2).toBeGreaterThan(0);
+
+  await executeWebMcpTool(page, 'groundwork_select_candidate', { id: candidate.id });
+  await expect(page.getByTestId('candidate-list')).toBeVisible();
+  await expect(page.locator('.candidate-card.selected')).toHaveCount(1);
+  await expect(page.getByText('fresh', { exact: true })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });

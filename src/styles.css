@@ -1,9 +1,14 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700&display=swap');
-
 :root {
   color: #eaf5ec;
   background: #071c1b;
-  font-family: 'DM Sans', system-ui, sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-synthesis: none;
   --ink: #eaf5ec;
   --muted: #9bb3ae;
@@ -60,7 +65,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-family: Manrope, sans-serif;
+  font-family: inherit;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -80,6 +85,15 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.demo-badge {
+  padding: 3px 7px;
+  border: 1px solid rgba(240, 164, 60, 0.4);
+  border-radius: 999px;
+  color: #ffc168;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 9px;
 }
 .status-dot {
   width: 7px;
@@ -115,7 +129,7 @@ button:disabled {
 }
 .panel h1,
 .panel h2 {
-  font-family: Manrope, sans-serif;
+  font-family: inherit;
   margin: 0;
   letter-spacing: -0.035em;
 }
@@ -159,6 +173,7 @@ button {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.055);
   padding: 8px 11px;
+  min-height: 40px;
   transition:
     border-color 150ms ease,
     background 150ms ease,
@@ -240,6 +255,12 @@ input {
 .office-chip span {
   color: #ff7657;
 }
+.compact-onboarding .office-chip {
+  margin: 10px 0 12px;
+}
+.compact-onboarding button {
+  width: 100%;
+}
 
 .panel-heading {
   display: flex;
@@ -290,7 +311,7 @@ input {
 }
 .condition-item {
   display: grid;
-  grid-template-columns: 15px 1fr 54px 28px;
+  grid-template-columns: 28px 1fr 54px 28px;
   align-items: center;
   gap: 8px;
   padding: 9px;
@@ -299,14 +320,14 @@ input {
   font-size: 12px;
 }
 .condition-item.preference {
-  grid-template-columns: 15px 1fr 28px;
+  grid-template-columns: 28px 1fr 28px;
 }
 .condition-item input {
   padding: 4px 5px;
 }
 .visibility-dot {
-  width: 11px;
-  height: 11px;
+  width: 28px;
+  height: 28px;
   border: 0;
   padding: 0;
   border-radius: 50%;
@@ -331,6 +352,9 @@ input {
   padding: 3px;
   background: transparent;
 }
+.remove-button {
+  min-width: 28px;
+}
 .action-row {
   display: flex;
   flex-wrap: wrap;
@@ -347,10 +371,16 @@ input {
   min-width: 0;
   background: #dce6df;
 }
-.map-canvas,
+.map-shell,
 .map-loading {
   position: absolute;
   inset: 0;
+}
+.map-shell > .map-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 .map-loading {
   display: grid;
@@ -374,6 +404,38 @@ input {
 }
 .drawing-pill {
   background: #f5ffe1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.drawing-pill button {
+  min-height: 28px;
+  padding: 3px 8px;
+  border-color: rgba(16, 32, 30, 0.25);
+  color: #10201e;
+  background: transparent;
+}
+.map-error {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  color: #14312e;
+  background: #dce6df;
+}
+.map-error span {
+  max-width: 380px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.map-error button {
+  color: #eaf5ec;
+  background: #102d2b;
 }
 .maplibregl-ctrl-bottom-right {
   margin-bottom: 6px;
@@ -459,6 +521,17 @@ input {
   display: block;
   margin-left: auto;
   font-size: 10px;
+  min-height: 40px;
+}
+.candidate-detail,
+.candidate-warning {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.candidate-warning {
+  color: #ffc168;
 }
 
 .agent-count {
@@ -495,6 +568,14 @@ input {
   font-size: 8px;
   letter-spacing: 0.1em;
   margin-bottom: 2px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.actor time {
+  color: var(--muted);
+  font-weight: 400;
+  letter-spacing: 0;
 }
 .actor.agent {
   color: var(--cyan);
@@ -537,6 +618,28 @@ input {
   border-radius: 9px;
   font-size: 12px;
 }
+.fatal-error {
+  min-height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  color: var(--ink);
+  background: #071c1b;
+}
+.fatal-error h1,
+.fatal-error p {
+  margin: 0;
+}
+.fatal-error p {
+  color: var(--muted);
+}
+.sample-cancel {
+  width: 100%;
+  margin-top: 7px;
+}
 
 @media (max-width: 1050px) {
   .workspace-grid {
@@ -565,7 +668,8 @@ input {
     overflow: visible;
   }
   .map-region {
-    height: 58vh;
+    height: min(58vh, 520px);
+    min-height: 360px;
     margin: 0;
   }
   .right-sidebar {

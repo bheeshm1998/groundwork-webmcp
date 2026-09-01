@@ -10,10 +10,13 @@ export default defineConfig(({ mode }) => {
       {
         name: 'groundwork-origin-trial-token',
         transformIndexHtml(html) {
-          return html.replace(
-            '__WEBMCP_ORIGIN_TRIAL_TOKEN__',
-            env.VITE_WEBMCP_ORIGIN_TRIAL_TOKEN ?? '',
-          );
+          if (!env.VITE_WEBMCP_ORIGIN_TRIAL_TOKEN) {
+            return html.replace(
+              /\s*<meta http-equiv="origin-trial" content="__WEBMCP_ORIGIN_TRIAL_TOKEN__" \/>/u,
+              '',
+            );
+          }
+          return html.replace('__WEBMCP_ORIGIN_TRIAL_TOKEN__', env.VITE_WEBMCP_ORIGIN_TRIAL_TOKEN);
         },
       },
     ],

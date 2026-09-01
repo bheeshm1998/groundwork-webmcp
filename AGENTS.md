@@ -1,1 +1,3 @@
+# Project instructions
+
 When making any changes to the code, verify its functionality using the Playwright MCP server.

@@ -9,7 +9,10 @@ test.describe('Groundwork manual flow', () => {
     await expect(page.getByText('What location decision are you trying to make?')).toBeVisible();
     await page.getByTestId('load-sample').click();
     await expect(page.getByTestId('candidate-list')).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText(/agent actions available/u)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Change office or sample' })).toBeEnabled({
+      timeout: 20_000,
+    });
+    await expect(page.getByText('Manual workspace history')).toBeVisible();
 
     const bikeInput = page.getByLabel(/Minutes for 25-minute bicycle area/u);
     await bikeInput.fill('30');
@@ -20,6 +23,7 @@ test.describe('Groundwork manual flow', () => {
 
     await page.getByRole('button', { name: 'Undo last change' }).click();
     await expect(page.getByText(/Undid the most recent workspace change/u)).toBeVisible();
+    await expect(page.getByLabel(/Minutes for 25-minute bicycle area/u)).toHaveValue('25');
 
     await page.getByRole('button', { name: 'Share workspace' }).click();
     await expect(page.getByText('Link copied')).toBeVisible();

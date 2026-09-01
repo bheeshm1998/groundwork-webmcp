@@ -5,6 +5,8 @@ import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
+import pointOnFeature from '@turf/point-on-feature';
+import type { Feature, MultiPolygon, Polygon } from 'geojson';
 import type { Transform } from 'node:stream';
 
 type OsmNode = { type: 'node'; id: number; lon: number; lat: number; tags: Record<string, string> };
@@ -87,8 +89,14 @@ async function parseGraph(filteredPbf: string) {
 
   for (const way of ways) {
     const speed = speedFor(way.tags.highway);
-    const oneWay =
-      ['yes', '1', 'true'].includes(way.tags.oneway) && way.tags['oneway:bicycle'] !== 'no';
+    const bicycleOneWay = way.tags['oneway:bicycle'];
+    const followsMotorDirection = bicycleOneWay !== 'no';
+    const reverseOnly =
+      followsMotorDirection && (way.tags.oneway === '-1' || bicycleOneWay === '-1');
+    const forwardOnly =
+      !reverseOnly &&
+      followsMotorDirection &&
+      (['yes', '1', 'true'].includes(way.tags.oneway) || bicycleOneWay === 'yes');
     for (let index = 0; index < way.refs.length - 1; index += 1) {
       const fromId = way.refs[index]!;
       const toId = way.refs[index + 1]!;
@@ -98,8 +106,8 @@ async function parseGraph(filteredPbf: string) {
       const toCoordinate = nodes.get(toId);
       if (from === undefined || to === undefined || !fromCoordinate || !toCoordinate) continue;
       const weight = (distanceKm(fromCoordinate, toCoordinate) / speed) * 60;
-      adjacency[from]!.push({ target: to, weight });
-      if (!oneWay) adjacency[to]!.push({ target: from, weight });
+      if (!reverseOnly) adjacency[from]!.push({ target: to, weight });
+      if (!forwardOnly) adjacency[to]!.push({ target: from, weight });
     }
   }
 
@@ -130,6 +138,12 @@ async function parseGraph(filteredPbf: string) {
 async function readAreaPlaces(geoJsonSequence: string) {
   const text = await readFile(geoJsonSequence, 'utf8');
   const parks: Array<{ id: string; name: string; coordinates: Coordinate }> = [];
+  const groceries: Array<{
+    id: string;
+    name: string;
+    coordinates: Coordinate;
+    type: 'supermarket' | 'grocery';
+  }> = [];
   for (const line of text.split(/\r?\n/u)) {
     if (!line.trim()) continue;
     const feature = JSON.parse(line) as {
@@ -137,35 +151,31 @@ async function readAreaPlaces(geoJsonSequence: string) {
       properties?: Record<string, string>;
       geometry?: { type: string; coordinates: unknown };
     };
-    if (
-      feature.properties?.leisure !== 'park' ||
-      !feature.geometry ||
-      !['Polygon', 'MultiPolygon'].includes(feature.geometry.type)
-    )
-      continue;
-    const flattened: number[][] = [];
-    const collect = (value: unknown) => {
-      if (
-        Array.isArray(value) &&
-        value.length === 2 &&
-        value.every((part) => typeof part === 'number')
-      )
-        flattened.push(value as number[]);
-      else if (Array.isArray(value)) value.forEach(collect);
+    if (!feature.geometry || !['Polygon', 'MultiPolygon'].includes(feature.geometry.type)) continue;
+    const areaFeature: Feature<Polygon | MultiPolygon> = {
+      type: 'Feature',
+      properties: feature.properties ?? {},
+      geometry: feature.geometry as Polygon | MultiPolygon,
     };
-    collect(feature.geometry.coordinates);
-    if (!flattened.length) continue;
-    const center: Coordinate = [
-      flattened.reduce((sum, value) => sum + value[0]!, 0) / flattened.length,
-      flattened.reduce((sum, value) => sum + value[1]!, 0) / flattened.length,
-    ];
-    parks.push({
-      id: feature.id ?? `park-${parks.length}`,
-      name: feature.properties?.name ?? 'Unnamed park',
-      coordinates: center,
-    });
+    const coordinates = pointOnFeature(areaFeature).geometry.coordinates as Coordinate;
+    if (feature.properties?.leisure === 'park') {
+      parks.push({
+        id: feature.id ?? `park-${parks.length}`,
+        name: feature.properties?.name ?? 'Unnamed park',
+        coordinates,
+      });
+    }
+    const shop = feature.properties?.shop;
+    if (shop === 'supermarket' || shop === 'grocery') {
+      groceries.push({
+        id: feature.id ?? `grocery-${groceries.length}`,
+        name: feature.properties?.name ?? 'Unnamed grocery',
+        coordinates,
+        type: shop,
+      });
+    }
   }
-  return parks;
+  return { parks, groceries };
 }
 
 async function main() {
@@ -209,7 +219,7 @@ async function main() {
       '--overwrite',
     ]);
     const parsed = await parseGraph(filteredPath);
-    const areaParks = await readAreaPlaces(areasPath);
+    const areaPlaces = await readAreaPlaces(areasPath);
     const currentPlaces = JSON.parse(
       await readFile(join(outputDirectory, 'places.json'), 'utf8'),
     ) as { presets: unknown[] };
@@ -222,14 +232,14 @@ async function main() {
     await writeFile(join(outputDirectory, 'graph.json'), graphJson);
     await writeFile(
       join(outputDirectory, 'places.json'),
-      `${JSON.stringify({ groceries: parsed.groceries, parks: [...parsed.parks, ...areaParks], presets: currentPlaces.presets }, null, 2)}\n`,
+      `${JSON.stringify({ groceries: [...parsed.groceries, ...areaPlaces.groceries], parks: [...parsed.parks, ...areaPlaces.parks], presets: currentPlaces.presets }, null, 2)}\n`,
     );
     await writeFile(
       join(outputDirectory, 'metadata.json'),
       `${JSON.stringify({ datasetVersion: `sf-osm-${new Date().toISOString().slice(0, 10)}`, generatedAt: new Date().toISOString(), coverage: 'San Francisco, California', source: 'OpenStreetMap via pinned California PBF', license: 'ODbL 1.0', attribution: '© OpenStreetMap contributors', graphFormat: 'adjacency-v1', compressedGraphBytes: compressedBytes }, null, 2)}\n`,
     );
     process.stdout.write(
-      `Generated ${orderedSummary(parsed.graph.nodes.length, parsed.graph.targets.length, parsed.groceries.length, parsed.parks.length + areaParks.length)}\n`,
+      `Generated ${orderedSummary(parsed.graph.nodes.length, parsed.graph.targets.length, parsed.groceries.length + areaPlaces.groceries.length, parsed.parks.length + areaPlaces.parks.length)}\n`,
     );
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });

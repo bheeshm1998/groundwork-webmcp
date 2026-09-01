@@ -1,0 +1,70 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - link "Groundwork home" [ref=e5] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e6]: G
+      - generic [ref=e7]: Groundwork
+    - generic [ref=e8]:
+      - generic "Uses the bundled synthetic hackathon dataset" [ref=e9]: Demo data
+      - text: Manual mode
+  - generic [ref=e11]:
+    - complementary [ref=e12]:
+      - region [ref=e13]:
+        - generic [ref=e14]: Start with intent
+        - heading "What location decision are you trying to make?" [level=1] [ref=e15]
+        - paragraph [ref=e16]: Ask your browser agent, or build the same analysis manually. Every condition remains visible and editable.
+        - blockquote [ref=e17]: “Find me a place under a 25-minute bike ride from 1 Market Street, within 10 minutes of groceries and 8 minutes of a park.”
+        - button "Run the sample analysis" [disabled] [ref=e18]
+        - generic [ref=e19]:
+          - text: Office address
+          - generic [ref=e20]:
+            - textbox "Office address" [ref=e21]:
+              - /placeholder: 1 Market Street
+            - button "Search office locations" [disabled] [ref=e22]: →
+      - region [ref=e23]:
+        - generic [ref=e24]:
+          - generic [ref=e25]:
+            - generic [ref=e26]: Visible reasoning
+            - heading "Conditions" [level=2] [ref=e27]
+          - generic [ref=e28]: not combined
+        - generic [ref=e29]:
+          - generic [ref=e30]:
+            - text: Bike
+            - spinbutton "Bike" [ref=e31]: "25"
+          - button "Set bike" [disabled] [ref=e32]
+          - generic [ref=e33]:
+            - text: Grocery
+            - spinbutton "Grocery" [ref=e34]: "10"
+          - button "Set grocery" [disabled] [ref=e35]
+          - generic [ref=e36]:
+            - text: Park
+            - spinbutton "Park" [ref=e37]: "8"
+          - button "Set park" [disabled] [ref=e38]
+        - list
+        - generic [ref=e39]:
+          - button "Draw preference" [disabled] [ref=e40]
+          - button "Combine" [disabled] [ref=e41]
+        - paragraph [ref=e42]: Walking access uses straight-line distance at 1.4 m/s. Bicycle times are modeled estimates.
+    - generic [ref=e43]:
+      - generic [ref=e44]: Loading map…
+      - status [ref=e45]: Calculating on this device…
+    - complementary [ref=e46]:
+      - region [ref=e47]:
+        - generic [ref=e48]:
+          - generic [ref=e49]:
+            - generic [ref=e50]: Calculated result
+            - heading "Matching area" [level=2] [ref=e51]
+          - strong [ref=e52]: 0.00 km²
+        - paragraph [ref=e53]: Combine at least two conditions to reveal the overlap.
+      - region [ref=e54]:
+        - generic [ref=e55]:
+          - heading "Activity" [level=2] [ref=e56]
+          - generic [ref=e57]: Manual workspace history
+        - list
+        - generic [ref=e59]:
+          - button "Undo last change" [disabled] [ref=e60]
+          - button "Share workspace" [disabled] [ref=e61]
+          - button "Reset" [disabled] [ref=e62]
+  - generic [ref=e63]:
+    - generic [ref=e64]: G
+    - paragraph [ref=e65]: Loading the San Francisco workspace…

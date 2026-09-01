@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import type { GeoJSONSource, Map as MapLibreMap, MapLayerMouseEvent, Marker } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -8,7 +8,7 @@ import '@watergis/maplibre-gl-terradraw/dist/maplibre-gl-terradraw.css';
 import type { Feature, FeatureCollection, Point } from 'geojson';
 import type { AreaGeometry } from '../domain/schemas';
 import { workspaceService } from '../domain/workspace-service';
-import { completePreferenceDraw } from './drawing';
+import { cancelPreferenceDraw, completePreferenceDraw } from './drawing';
 import { useWorkspaceStore } from '../store/workspace-store';
 import { workspaceSnapshot } from '../store/workspace-store';
 import type { CanonicalWorkspace, DerivedAnalysis } from '../domain/schemas';
@@ -70,6 +70,11 @@ export function MapView() {
   const mapRef = useRef<MapLibreMap | null>(null);
   const officeMarkerRef = useRef<Marker | null>(null);
   const drawControlRef = useRef<MaplibreTerradrawControl | null>(null);
+  const drawnPreferenceIdRef = useRef<string | number | null>(null);
+  const syncingDrawRef = useRef(false);
+  const [mapError, setMapError] = useState<string | null>(null);
+  const [mapAttempt, setMapAttempt] = useState(0);
+  const [drawReadyVersion, setDrawReadyVersion] = useState(0);
   const canonical = useWorkspaceStore((state) => state.canonical);
   const office = useWorkspaceStore((state) => state.canonical.office);
   const derived = useWorkspaceStore((state) => state.derived);
@@ -77,25 +82,32 @@ export function MapView() {
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: getMapStyle(),
-      center: initialViewRef.current.center,
-      zoom: initialViewRef.current.zoom,
-      bearing: initialViewRef.current.bearing,
-      pitch: initialViewRef.current.pitch,
-      attributionControl: false,
-      maxBounds: [
-        [-122.56, 37.67],
-        [-122.31, 37.85],
-      ],
-    });
+    let map: MapLibreMap;
+    try {
+      map = new maplibregl.Map({
+        container: containerRef.current,
+        style: getMapStyle(),
+        center: initialViewRef.current.center,
+        zoom: initialViewRef.current.zoom,
+        bearing: initialViewRef.current.bearing,
+        pitch: initialViewRef.current.pitch,
+        attributionControl: false,
+        maxBounds: [
+          [-122.56, 37.67],
+          [-122.31, 37.85],
+        ],
+      });
+    } catch {
+      setMapError('The interactive map could not start in this browser.');
+      return;
+    }
+    setMapError(null);
     mapRef.current = map;
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
     map.addControl(
       new maplibregl.AttributionControl({
         compact: true,
-        customAttribution: 'Analysis © OpenStreetMap contributors',
+        customAttribution: 'Synthetic demo analysis · Map © OpenStreetMap contributors',
       }),
       'bottom-right',
     );
@@ -107,7 +119,13 @@ export function MapView() {
     drawControlRef.current = drawControl;
     map.addControl(drawControl, 'bottom-left');
 
+    const onMapError = () => {
+      if (!map.isStyleLoaded()) setMapError('The base map could not be loaded.');
+    };
+    map.on('error', onMapError);
+
     map.on('load', () => {
+      setMapError(null);
       map.addSource('groundwork-conditions', { type: 'geojson', data: EMPTY_COLLECTION });
       map.addLayer({
         id: 'groundwork-condition-fill',
@@ -188,6 +206,7 @@ export function MapView() {
       });
       const current = workspaceSnapshot();
       syncWorkspaceSources(map, current.canonical, current.derived);
+      setDrawReadyVersion((version) => version + 1);
     });
 
     const onMoveEnd = () => {
@@ -207,10 +226,29 @@ export function MapView() {
     const onStartDraw = () => {
       const draw = drawControl.getTerraDrawInstance();
       if (!draw) return;
+      syncingDrawRef.current = true;
       draw.clear();
+      syncingDrawRef.current = false;
+      drawnPreferenceIdRef.current = null;
       draw.setMode('polygon');
     };
+    const onCancelDraw = () => {
+      const draw = drawControl.getTerraDrawInstance();
+      if (!draw) return;
+      syncingDrawRef.current = true;
+      draw.clear();
+      syncingDrawRef.current = false;
+      drawnPreferenceIdRef.current = null;
+      draw.setMode('render');
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && workspaceSnapshot().operation === 'drawing') {
+        cancelPreferenceDraw();
+      }
+    };
     window.addEventListener('groundwork:start-draw', onStartDraw);
+    window.addEventListener('groundwork:cancel-draw', onCancelDraw);
+    window.addEventListener('keydown', onKeyDown);
 
     const draw = drawControl.getTerraDrawInstance();
     const onFinish = (featureId: string | number) => {
@@ -221,21 +259,88 @@ export function MapView() {
         properties: {},
         geometry: feature.geometry,
       } as AreaGeometry;
+      drawnPreferenceIdRef.current = featureId;
       draw?.setMode('select');
       completePreferenceDraw(geometry);
       void workspaceService.execute({ type: 'add-preference', geometry });
     };
+    const onDrawChange = (featureIds: Array<string | number>, changeType: string) => {
+      if (syncingDrawRef.current) return;
+      const preferenceId = workspaceSnapshot().canonical.conditions.find(
+        (condition) => condition.kind === 'preference',
+      )?.id;
+      if (changeType === 'delete' && drawnPreferenceIdRef.current !== null) {
+        if (featureIds.includes(drawnPreferenceIdRef.current) && preferenceId) {
+          drawnPreferenceIdRef.current = null;
+          void workspaceService.execute({ type: 'delete-condition', id: preferenceId });
+        }
+        return;
+      }
+      if (changeType !== 'update') return;
+      const featureId = drawnPreferenceIdRef.current;
+      if (featureId === null || !featureIds.includes(featureId)) return;
+      const feature = draw?.getSnapshotFeature(featureId);
+      if (feature?.geometry.type === 'Polygon') {
+        void workspaceService.execute({
+          type: 'add-preference',
+          geometry: {
+            type: 'Feature',
+            properties: {},
+            geometry: feature.geometry,
+          },
+        });
+      }
+    };
     draw?.on('finish', onFinish);
+    draw?.on('change', onDrawChange);
 
     return () => {
+      if (workspaceSnapshot().operation === 'drawing') {
+        cancelPreferenceDraw('Drawing was cancelled because the map closed.');
+      }
       draw?.off('finish', onFinish);
+      draw?.off('change', onDrawChange);
       window.removeEventListener('groundwork:start-draw', onStartDraw);
+      window.removeEventListener('groundwork:cancel-draw', onCancelDraw);
+      window.removeEventListener('keydown', onKeyDown);
+      map.off('error', onMapError);
       map.off('moveend', onMoveEnd);
       officeMarkerRef.current?.remove();
       map.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [mapAttempt]);
+
+  useEffect(() => {
+    const draw = drawControlRef.current?.getTerraDrawInstance();
+    if (!draw) return;
+    const preference = canonical.conditions.find((condition) => condition.kind === 'preference');
+    syncingDrawRef.current = true;
+    try {
+      const existingId = drawnPreferenceIdRef.current;
+      if (!preference || preference.geometry.geometry.type !== 'Polygon') {
+        if (existingId !== null && draw.hasFeature(existingId)) draw.removeFeatures([existingId]);
+        drawnPreferenceIdRef.current = null;
+        return;
+      }
+      if (existingId !== null && draw.hasFeature(existingId)) {
+        draw.updateFeatureGeometry(existingId, preference.geometry.geometry);
+      } else {
+        const featureId = draw.getFeatureId();
+        const results = draw.addFeatures([
+          {
+            id: featureId,
+            type: 'Feature',
+            properties: { mode: 'polygon' },
+            geometry: preference.geometry.geometry,
+          },
+        ]);
+        if (results[0]?.valid) drawnPreferenceIdRef.current = featureId;
+      }
+    } finally {
+      syncingDrawRef.current = false;
+    }
+  }, [canonical.conditions, drawReadyVersion]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -264,10 +369,21 @@ export function MapView() {
   }, [office]);
 
   return (
-    <div
-      ref={containerRef}
-      className="map-canvas"
-      aria-label="Interactive San Francisco analysis map"
-    />
+    <div className="map-shell">
+      <div
+        ref={containerRef}
+        className="map-canvas"
+        aria-label="Interactive San Francisco analysis map"
+      />
+      {mapError ? (
+        <div className="map-error" role="alert">
+          <strong>Map unavailable</strong>
+          <span>{mapError} Your conditions and results are still available in the panels.</span>
+          <button type="button" onClick={() => setMapAttempt((attempt) => attempt + 1)}>
+            Retry map
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }

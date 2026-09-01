@@ -4,6 +4,7 @@ import type { AreaGeometry, CanonicalWorkspace, WorkspaceShare } from '../domain
 import { WorkspaceShareSchema } from '../domain/schemas';
 
 export const MAX_SHARE_LENGTH = 8_192;
+export const MAX_DECOMPRESSED_SHARE_BYTES = 256_000;
 export const STORAGE_KEY = 'groundwork:workspace:v1';
 
 function toBase64Url(bytes: Uint8Array): string {
@@ -58,7 +59,13 @@ export function decodeWorkspace(encoded: string): WorkspaceShare {
   if (!encoded || encoded.length > MAX_SHARE_LENGTH)
     throw new Error('The workspace link is invalid or too large.');
   try {
-    const json = strFromU8(inflateSync(fromBase64Url(encoded)));
+    const inflated = inflateSync(fromBase64Url(encoded), {
+      out: new Uint8Array(MAX_DECOMPRESSED_SHARE_BYTES + 1),
+    });
+    if (inflated.length > MAX_DECOMPRESSED_SHARE_BYTES) {
+      throw new Error('The workspace link expands beyond the supported size.');
+    }
+    const json = strFromU8(inflated);
     return WorkspaceShareSchema.parse(JSON.parse(json));
   } catch {
     throw new Error('The workspace link is invalid or was created by an unsupported version.');

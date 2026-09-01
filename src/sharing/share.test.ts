@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest';
+import { deflateSync, strToU8 } from 'fflate';
 import { DATASET_VERSION, EMPTY_CANONICAL } from '../domain/defaults';
 import {
   clearLocalWorkspace,
@@ -33,5 +34,16 @@ describe('workspace sharing', () => {
   it('validates local persistence', () => {
     saveLocalWorkspace(payload);
     expect(readLocalWorkspace()).toEqual(payload);
+  });
+
+  it('rejects highly compressed fragments that expand beyond the safe limit', () => {
+    const compressed = deflateSync(strToU8('x'.repeat(300_000)));
+    const encoded = btoa(String.fromCharCode(...compressed))
+      .replaceAll('+', '-')
+      .replaceAll('/', '_')
+      .replace(/=+$/u, '');
+
+    expect(encoded.length).toBeLessThan(8_192);
+    expect(() => decodeWorkspace(encoded)).toThrow(/invalid|too large|unsupported/u);
   });
 });

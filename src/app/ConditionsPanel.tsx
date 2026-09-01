@@ -1,14 +1,32 @@
 import { useEffect, useState } from 'react';
 import { workspaceService } from '../domain/workspace-service';
-import { requestPreferenceDraw } from '../map/drawing';
+import { cancelPreferenceDraw, requestPreferenceDraw } from '../map/drawing';
 import { useWorkspaceStore } from '../store/workspace-store';
 
-function ConditionMinutes({ id, label, value }: { id: string; label: string; value: number }) {
+function ConditionMinutes({
+  id,
+  label,
+  value,
+  min,
+  max,
+  disabled,
+}: {
+  id: string;
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  disabled: boolean;
+}) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
 
   const commit = (nextValue: number) => {
-    if (Number.isFinite(nextValue) && nextValue !== value) {
+    if (!Number.isFinite(nextValue) || nextValue < min || nextValue > max) {
+      setDraft(value);
+      return;
+    }
+    if (nextValue !== value) {
       void workspaceService.execute({ type: 'update-condition', id, maxMinutes: nextValue });
     }
   };
@@ -17,14 +35,14 @@ function ConditionMinutes({ id, label, value }: { id: string; label: string; val
     <input
       aria-label={`Minutes for ${label}`}
       type="number"
-      min="1"
-      max="90"
+      min={min}
+      max={max}
       value={draft}
+      disabled={disabled}
       onChange={(event) => setDraft(event.target.valueAsNumber)}
       onBlur={() => commit(draft)}
       onKeyDown={(event) => {
         if (event.key === 'Enter') {
-          commit(event.currentTarget.valueAsNumber);
           event.currentTarget.blur();
         }
       }}
@@ -39,6 +57,7 @@ export function ConditionsPanel() {
   const [bikeMinutes, setBikeMinutes] = useState(25);
   const [groceryMinutes, setGroceryMinutes] = useState(10);
   const [parkMinutes, setParkMinutes] = useState(8);
+  const mutationsDisabled = operation === 'calculating' || operation === 'drawing';
 
   return (
     <section className="panel" aria-labelledby="conditions-heading">
@@ -62,11 +81,17 @@ export function ConditionsPanel() {
         </label>
         <button
           type="button"
+          disabled={
+            mutationsDisabled ||
+            !Number.isFinite(bikeMinutes) ||
+            bikeMinutes < 5 ||
+            bikeMinutes > 90
+          }
           onClick={() =>
             void workspaceService.execute({ type: 'add-bike', maxMinutes: bikeMinutes })
           }
         >
-          Add
+          Set bike
         </button>
         <label>
           Grocery
@@ -80,6 +105,12 @@ export function ConditionsPanel() {
         </label>
         <button
           type="button"
+          disabled={
+            mutationsDisabled ||
+            !Number.isFinite(groceryMinutes) ||
+            groceryMinutes < 1 ||
+            groceryMinutes > 45
+          }
           onClick={() =>
             void workspaceService.execute({
               type: 'add-access',
@@ -89,7 +120,7 @@ export function ConditionsPanel() {
             })
           }
         >
-          Add
+          Set grocery
         </button>
         <label>
           Park
@@ -103,6 +134,12 @@ export function ConditionsPanel() {
         </label>
         <button
           type="button"
+          disabled={
+            mutationsDisabled ||
+            !Number.isFinite(parkMinutes) ||
+            parkMinutes < 1 ||
+            parkMinutes > 45
+          }
           onClick={() =>
             void workspaceService.execute({
               type: 'add-access',
@@ -111,7 +148,7 @@ export function ConditionsPanel() {
             })
           }
         >
-          Add
+          Set park
         </button>
       </div>
       <ul className="condition-list">
@@ -131,6 +168,7 @@ export function ConditionsPanel() {
                   visible: !condition.visible,
                 })
               }
+              disabled={mutationsDisabled}
             />
             <span>{condition.label}</span>
             {condition.kind !== 'preference' ? (
@@ -138,12 +176,16 @@ export function ConditionsPanel() {
                 id={condition.id}
                 label={condition.label}
                 value={condition.maxMinutes}
+                min={condition.kind === 'bike' ? 5 : 1}
+                max={condition.kind === 'bike' ? 90 : 45}
+                disabled={mutationsDisabled}
               />
             ) : null}
             <button
               type="button"
               className="remove-button"
               aria-label={`Delete ${condition.label}`}
+              disabled={mutationsDisabled}
               onClick={() =>
                 void workspaceService.execute({ type: 'delete-condition', id: condition.id })
               }
@@ -157,14 +199,20 @@ export function ConditionsPanel() {
         <button
           type="button"
           onClick={() => void requestPreferenceDraw().catch(() => undefined)}
-          disabled={operation === 'drawing'}
+          disabled={operation === 'drawing' || operation === 'calculating'}
         >
           {operation === 'drawing' ? 'Draw on the map…' : 'Draw preference'}
         </button>
+        {operation === 'drawing' ? (
+          <button type="button" className="ghost-danger" onClick={() => cancelPreferenceDraw()}>
+            Cancel drawing
+          </button>
+        ) : null}
         {freshness === 'stale' ? (
           <button
             type="button"
             className="warning-button"
+            disabled={mutationsDisabled}
             onClick={() => void workspaceService.execute({ type: 'recalculate' })}
           >
             Recalculate
@@ -173,7 +221,7 @@ export function ConditionsPanel() {
           <button
             type="button"
             onClick={() => void workspaceService.execute({ type: 'combine' })}
-            disabled={conditions.length < 2}
+            disabled={conditions.length < 2 || mutationsDisabled}
           >
             Combine
           </button>

@@ -5,6 +5,7 @@ import { useWorkspaceStore } from '../store/workspace-store';
 
 export function ActivityPanel() {
   const [shareMessage, setShareMessage] = useState('');
+  const [confirmingReset, setConfirmingReset] = useState(false);
   const state = useWorkspaceStore();
   const capabilityCount = getCapabilities(
     state.canonical,
@@ -31,7 +32,9 @@ export function ActivityPanel() {
         <h2 id="activity-heading">Activity</h2>
         <span className="agent-count">
           <i />
-          {capabilityCount} agent actions available
+          {document.modelContext
+            ? `${capabilityCount} agent actions available`
+            : 'Manual workspace history'}
         </span>
       </div>
       <ol className="activity-list">
@@ -40,7 +43,15 @@ export function ActivityPanel() {
           .slice(0, 6)
           .map((entry) => (
             <li key={entry.id}>
-              <span className={`actor ${entry.actor}`}>{entry.actor}</span>
+              <span className={`actor ${entry.actor}`}>
+                {entry.actor}
+                <time dateTime={new Date(entry.timestamp).toISOString()}>
+                  {new Date(entry.timestamp).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </time>
+              </span>
               {entry.message}
             </li>
           ))}
@@ -49,20 +60,32 @@ export function ActivityPanel() {
         <button
           type="button"
           onClick={() => void workspaceService.execute({ type: 'undo' })}
-          disabled={!state.undo}
+          disabled={
+            !state.undo || state.operation === 'calculating' || state.operation === 'drawing'
+          }
         >
           Undo last change
         </button>
-        <button type="button" onClick={share}>
+        <button type="button" onClick={share} disabled={state.operation === 'calculating'}>
           Share workspace
         </button>
         <button
           type="button"
           className="ghost-danger"
-          onClick={() => void workspaceService.execute({ type: 'reset' })}
+          onClick={() => {
+            if (!confirmingReset) return setConfirmingReset(true);
+            setConfirmingReset(false);
+            void workspaceService.execute({ type: 'reset' });
+          }}
+          disabled={state.operation === 'calculating'}
         >
-          Reset
+          {confirmingReset ? 'Confirm reset' : 'Reset'}
         </button>
+        {confirmingReset ? (
+          <button type="button" onClick={() => setConfirmingReset(false)}>
+            Cancel
+          </button>
+        ) : null}
       </div>
       {shareMessage ? <output className="share-output">{shareMessage}</output> : null}
     </section>

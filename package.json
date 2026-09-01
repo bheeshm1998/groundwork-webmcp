@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:release": "node scripts/validate-release.mjs && npm run build",
     "preview": "vite preview",
     "lint": "eslint .",
     "format:check": "prettier --check .",
@@ -23,6 +24,7 @@
     "@turf/distance": "^7.2.0",
     "@turf/helpers": "^7.2.0",
     "@turf/intersect": "^7.2.0",
+    "@turf/point-on-feature": "^7.4.0",
     "@turf/simplify": "^7.2.0",
     "@turf/union": "^7.2.0",
     "@watergis/maplibre-gl-terradraw": "^1.1.0",

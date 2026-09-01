@@ -10,14 +10,48 @@ export const CoordinateSchema = z.tuple([
 ]);
 export type Coordinate = z.infer<typeof CoordinateSchema>;
 
-export const PolygonFeatureSchema = z.object({
-  type: z.literal('Feature'),
-  properties: z.record(z.string(), z.unknown()).nullable(),
-  geometry: z.object({
-    type: z.enum(['Polygon', 'MultiPolygon']),
-    coordinates: z.array(z.unknown()),
-  }),
-});
+export const SanFranciscoCoordinateSchema = CoordinateSchema.refine(
+  ([longitude, latitude]) =>
+    longitude >= -122.53 && longitude <= -122.34 && latitude >= 37.69 && latitude <= 37.83,
+  'Choose a location inside the supported San Francisco area.',
+);
+
+const LinearRingSchema = z
+  .array(CoordinateSchema)
+  .min(4)
+  .max(500)
+  .refine(
+    (ring) => ring[0]?.[0] === ring.at(-1)?.[0] && ring[0]?.[1] === ring.at(-1)?.[1],
+    'Polygon rings must be closed.',
+  );
+const PolygonCoordinatesSchema = z.array(LinearRingSchema).min(1);
+
+export const PolygonFeatureSchema = z
+  .object({
+    type: z.literal('Feature'),
+    properties: z.record(z.string(), z.unknown()).nullable(),
+    geometry: z.discriminatedUnion('type', [
+      z.object({ type: z.literal('Polygon'), coordinates: PolygonCoordinatesSchema }),
+      z.object({
+        type: z.literal('MultiPolygon'),
+        coordinates: z.array(PolygonCoordinatesSchema).min(1),
+      }),
+    ]),
+  })
+  .superRefine((feature, context) => {
+    const rings =
+      feature.geometry.type === 'Polygon'
+        ? feature.geometry.coordinates
+        : feature.geometry.coordinates.flat();
+    const vertexCount = rings.reduce((total, ring) => total + ring.length, 0);
+    if (vertexCount > 500) {
+      context.addIssue({
+        code: 'custom',
+        path: ['geometry', 'coordinates'],
+        message: 'Drawings are limited to 500 vertices.',
+      });
+    }
+  }) as z.ZodType<AreaGeometry>;
 
 const ConditionBaseSchema = z.object({
   id: z.string().min(1),
@@ -51,7 +85,7 @@ export type Condition = z.infer<typeof ConditionSchema>;
 
 export const OfficeSchema = z.object({
   label: z.string().min(1),
-  coordinates: CoordinateSchema,
+  coordinates: SanFranciscoCoordinateSchema,
 });
 export type Office = z.infer<typeof OfficeSchema>;
 
@@ -71,14 +105,34 @@ export const ActivityEntrySchema = z.object({
 });
 export type ActivityEntry = z.infer<typeof ActivityEntrySchema>;
 
-export const CanonicalWorkspaceSchema = z.object({
-  office: OfficeSchema.nullable(),
-  conditions: z.array(ConditionSchema),
-  selectedCandidateId: z.string().nullable(),
-  removedCandidateIds: z.array(z.string()),
-  view: MapViewSchema,
-  combined: z.boolean(),
-});
+export const CanonicalWorkspaceSchema = z
+  .object({
+    office: OfficeSchema.nullable(),
+    conditions: z.array(ConditionSchema).max(20),
+    selectedCandidateId: z.string().nullable(),
+    removedCandidateIds: z.array(z.string()).max(1_000),
+    view: MapViewSchema,
+    combined: z.boolean(),
+  })
+  .superRefine((workspace, context) => {
+    if (workspace.combined && workspace.conditions.length < 2) {
+      context.addIssue({
+        code: 'custom',
+        path: ['combined'],
+        message: 'At least two conditions are required for a combined analysis.',
+      });
+    }
+    const identities = workspace.conditions.map((condition) =>
+      condition.kind === 'access' ? `access:${condition.category}` : condition.kind,
+    );
+    if (new Set(identities).size !== identities.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['conditions'],
+        message: 'Only one condition of each type can be active at a time.',
+      });
+    }
+  });
 export type CanonicalWorkspace = z.infer<typeof CanonicalWorkspaceSchema>;
 
 export interface Candidate {

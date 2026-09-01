@@ -18,6 +18,7 @@ import {
   saveLocalWorkspace,
 } from '../sharing/share';
 import { useWorkspaceStore, workspaceSnapshot } from '../store/workspace-store';
+import { cancelPreferenceDraw } from '../map/drawing';
 
 function id(prefix: string): string {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
@@ -42,11 +43,11 @@ function commandMessage(command: WorkspaceCommand): string {
     case 'add-preference':
       return 'Added the area you would personally consider.';
     case 'update-condition':
-      return `Changed a condition to ${command.maxMinutes} minutes.`;
+      return `Changed condition ${command.id} to ${command.maxMinutes} minutes.`;
     case 'delete-condition':
-      return 'Deleted a condition.';
+      return `Deleted condition ${command.id}.`;
     case 'set-visibility':
-      return `${command.visible ? 'Showed' : 'Hid'} a condition layer.`;
+      return `${command.visible ? 'Showed' : 'Hid'} condition ${command.id}.`;
     case 'combine':
       return 'Combined the active conditions.';
     case 'recalculate':
@@ -54,9 +55,9 @@ function commandMessage(command: WorkspaceCommand): string {
     case 'rank':
       return 'Ranked the three strongest candidate areas.';
     case 'select-candidate':
-      return command.id ? 'Selected a candidate area.' : 'Cleared the candidate selection.';
+      return command.id ? `Selected candidate ${command.id}.` : 'Cleared the candidate selection.';
     case 'remove-candidate':
-      return 'Removed a candidate from consideration.';
+      return `Removed candidate ${command.id} from consideration.`;
     case 'undo':
       return 'Undid the most recent workspace change.';
     case 'reset':
@@ -70,15 +71,33 @@ function cloneCanonical(canonical: CanonicalWorkspace): CanonicalWorkspace {
   return structuredClone(canonical);
 }
 
-function persist() {
+function persist(): string | null {
   const state = workspaceSnapshot();
-  saveLocalWorkspace({
-    schemaVersion: 1,
-    datasetVersion: state.datasetVersion,
-    canonical: state.canonical,
-    activity: state.activity,
-    undo: state.undo,
-  });
+  try {
+    saveLocalWorkspace({
+      schemaVersion: 1,
+      datasetVersion: state.datasetVersion,
+      canonical: state.canonical,
+      activity: state.activity,
+      undo: state.undo,
+    });
+    return null;
+  } catch {
+    return 'Your change is available in this tab, but the browser could not save it locally.';
+  }
+}
+
+function isMeaningfulChange(command: WorkspaceCommand): boolean {
+  return !['set-view', 'set-visibility', 'recalculate', 'rank', 'select-candidate'].includes(
+    command.type,
+  );
+}
+
+function userMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.name === 'ZodError') {
+    return 'That value is outside the supported range or has an invalid format.';
+  }
+  return error instanceof Error ? error.message : fallback;
 }
 
 export class WorkspaceService {
@@ -92,7 +111,17 @@ export class WorkspaceService {
       this.presets = initialized.presets;
       let restored = null;
       try {
-        restored = readSharedWorkspace() ?? readLocalWorkspace();
+        const shared = readSharedWorkspace();
+        const local = shared ? null : readLocalWorkspace();
+        restored = shared ?? local;
+        if (restored && restored.datasetVersion !== initialized.metadata.datasetVersion) {
+          restored = null;
+          throw new Error(
+            shared
+              ? 'This share link uses a different map dataset and cannot be opened safely.'
+              : 'The saved workspace used an older map dataset and was not restored.',
+          );
+        }
       } catch (error) {
         store.commit({
           error:
@@ -125,10 +154,25 @@ export class WorkspaceService {
     const state = workspaceSnapshot();
     if (state.operation === 'calculating')
       return { ok: false, message: 'Another calculation is still running.' };
+    if (state.operation === 'drawing' && !['set-view', 'reset'].includes(command.type)) {
+      return { ok: false, message: 'Finish or cancel the active drawing first.' };
+    }
     if (command.type === 'set-view') {
-      state.commit({ canonical: { ...state.canonical, view: command.view } });
-      persist();
-      return { ok: true, message: 'Map view updated.' };
+      try {
+        const canonical = CanonicalWorkspaceSchema.parse({
+          ...state.canonical,
+          view: command.view,
+        });
+        state.commit({ canonical });
+        const warning = persist();
+        if (warning) state.commit({ error: warning });
+        return { ok: true, message: warning ?? 'Map view updated.' };
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : 'The map view could not be saved.',
+        };
+      }
     }
     if (command.type === 'undo') {
       if (!state.undo) return { ok: false, message: 'There is no recent change to undo.' };
@@ -146,21 +190,27 @@ export class WorkspaceService {
           operation: 'idle',
           analysisFreshness: restored.combined ? 'fresh' : 'not-combined',
         });
-        persist();
-        return { ok: true, message: 'The last change was undone.' };
+        const warning = persist();
+        if (warning) state.commit({ error: warning });
+        return { ok: true, message: warning ?? 'The last change was undone.' };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Undo failed.';
+        const message = userMessage(error, 'Undo failed.');
         state.setOperation('error', message);
         return { ok: false, message };
       }
     }
     if (command.type === 'reset') {
-      clearLocalWorkspace();
+      if (state.operation === 'drawing') cancelPreferenceDraw('Drawing was cancelled by reset.');
+      try {
+        clearLocalWorkspace();
+      } catch {
+        // The in-memory reset remains useful even when browser storage is unavailable.
+      }
       state.commit({
         canonical: cloneCanonical(EMPTY_CANONICAL),
         derived: structuredClone(EMPTY_DERIVED),
         activity: [activity(commandMessage(command), command.actor)],
-        undo: null,
+        undo: cloneCanonical(state.canonical),
         operation: 'idle',
         analysisFreshness: 'not-combined',
         error: null,
@@ -180,6 +230,7 @@ export class WorkspaceService {
       switch (command.type) {
         case 'set-office':
           canonical.office = command.office;
+          canonical.selectedCandidateId = null;
           if (canonical.combined && canonical.conditions.some(({ kind }) => kind === 'bike')) {
             freshness = 'stale';
             needsAnalysis = false;
@@ -188,6 +239,7 @@ export class WorkspaceService {
         case 'add-bike':
           if (!canonical.office)
             throw new Error('Set an office before adding a bicycle condition.');
+          canonical.conditions = canonical.conditions.filter(({ kind }) => kind !== 'bike');
           canonical.conditions.push({
             id: id('bike'),
             kind: 'bike',
@@ -197,6 +249,9 @@ export class WorkspaceService {
           });
           break;
         case 'add-access':
+          canonical.conditions = canonical.conditions.filter(
+            (condition) => condition.kind !== 'access' || condition.category !== command.category,
+          );
           canonical.conditions.push({
             id: id(command.category),
             kind: 'access',
@@ -232,6 +287,9 @@ export class WorkspaceService {
           break;
         }
         case 'delete-condition':
+          if (!canonical.conditions.some(({ id: conditionId }) => conditionId === command.id)) {
+            throw new Error('Condition not found.');
+          }
           canonical.conditions = canonical.conditions.filter(
             ({ id: conditionId }) => conditionId !== command.id,
           );
@@ -258,12 +316,22 @@ export class WorkspaceService {
         case 'rank':
           if (!canonical.combined || freshness !== 'fresh')
             throw new Error('Create a fresh feasible region before ranking candidates.');
+          needsAnalysis = false;
           break;
         case 'select-candidate':
+          if (
+            command.id !== null &&
+            !state.derived.candidates.some(({ id: candidateId }) => candidateId === command.id)
+          ) {
+            throw new Error('Candidate not found.');
+          }
           canonical.selectedCandidateId = command.id;
           needsAnalysis = false;
           break;
         case 'remove-candidate':
+          if (!state.derived.candidates.some(({ id }) => id === command.id)) {
+            throw new Error('Candidate not found.');
+          }
           canonical.removedCandidateIds = [
             ...new Set([...canonical.removedCandidateIds, command.id]),
           ];
@@ -273,20 +341,36 @@ export class WorkspaceService {
 
       canonical = CanonicalWorkspaceSchema.parse(canonical);
       const derived = needsAnalysis ? await getGeoWorker().analyze(canonical) : state.derived;
+      if (
+        canonical.selectedCandidateId &&
+        !derived.candidates.some(({ id }) => id === canonical.selectedCandidateId)
+      ) {
+        canonical.selectedCandidateId = null;
+      }
+      if (freshness === 'stale') derived.candidates = [];
       if (!canonical.combined) freshness = 'not-combined';
       state.commit({
         canonical,
         derived,
-        undo: before,
+        undo: isMeaningfulChange(command) ? before : state.undo,
         activity: withActivity(state.activity, activity(commandMessage(command), command.actor)),
         operation: 'idle',
         analysisFreshness: freshness,
         error: null,
       });
-      persist();
-      return { ok: true, message: commandMessage(command), data: derived };
+      const warning = persist();
+      if (warning) state.commit({ error: warning });
+      return {
+        ok: true,
+        message: warning ?? commandMessage(command),
+        data: {
+          feasibleAreaKm2: derived.feasibleAreaKm2,
+          candidateIds: derived.candidates.map(({ id }) => id),
+          freshness,
+        },
+      };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'The workspace change failed.';
+      const message = userMessage(error, 'The workspace change failed.');
       state.setOperation('error', message);
       return { ok: false, message };
     }
@@ -360,9 +444,10 @@ export class WorkspaceService {
 
   private async searchLocations(query: string): Promise<LocationResult[]> {
     const normalized = query.trim().toLowerCase();
+    if (normalized.length < 2) return [];
     const local = this.presets.filter(({ label }) => label.toLowerCase().includes(normalized));
     const key = import.meta.env.VITE_MAPTILER_KEY;
-    if (!key || !query.trim()) return local;
+    if (!key) return local;
     try {
       const url = new URL(`https://api.maptiler.com/geocoding/${encodeURIComponent(query)}.json`);
       url.searchParams.set('key', key);
