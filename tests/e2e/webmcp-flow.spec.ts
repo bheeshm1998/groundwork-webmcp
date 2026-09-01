@@ -53,22 +53,22 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
     .toBe(true);
 
   const search = await executeWebMcpTool(page, 'groundwork_search_locations', {
-    query: '1 Market',
+    query: 'San Francisco City Hall',
   });
   expect(search).toMatchObject({
     ok: true,
     data: [
       {
-        label: '1 Market Street, San Francisco',
-        coordinates: [-122.3949, 37.7936],
+        label: 'San Francisco City Hall',
+        coordinates: [-122.4192315, 37.7792763],
       },
     ],
   });
 
   await executeWebMcpTool(page, 'groundwork_set_office', {
-    label: '1 Market Street, San Francisco',
-    longitude: -122.3949,
-    latitude: 37.7936,
+    label: 'San Francisco City Hall',
+    longitude: -122.4192315,
+    latitude: 37.7792763,
   });
   await expect
     .poll(() =>
@@ -105,7 +105,7 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
     ok: true,
     data: {
       freshness: 'fresh',
-      office: { label: '1 Market Street, San Francisco' },
+      office: { label: 'San Francisco City Hall' },
     },
   });
   expect((workspace as any).data.conditions).toHaveLength(3);

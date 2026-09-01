@@ -16,6 +16,10 @@ export function App() {
   const initialized = useWorkspaceStore((state) => state.initialized);
   const operation = useWorkspaceStore((state) => state.operation);
   const error = useWorkspaceStore((state) => state.error);
+  const metadata = useWorkspaceStore((state) => state.datasetMetadata);
+  const hasStarted = useWorkspaceStore((state) =>
+    Boolean(state.canonical.office || state.canonical.conditions.length),
+  );
 
   useEffect(() => {
     void workspaceService.initialize();
@@ -30,14 +34,14 @@ export function App() {
           <span>Groundwork</span>
         </a>
         <div className="topbar-status">
-          <span className="demo-badge" title="Uses the bundled synthetic hackathon dataset">
-            Demo data
+          <span className="provenance-chip" title="Locally bundled, checksum-pinned source extract">
+            OpenStreetMap • extracted {metadata?.sources[0]?.extractDate ?? '…'}
           </span>
           <span className={`status-dot ${document.modelContext ? 'connected' : ''}`} />
           {document.modelContext ? 'WebMCP connected' : 'Manual mode'}
         </div>
       </header>
-      <div className="workspace-grid">
+      <div className={`workspace-grid ${hasStarted ? 'has-started' : ''}`}>
         <aside className="sidebar left-sidebar">
           <OnboardingPanel />
           <ConditionsPanel />

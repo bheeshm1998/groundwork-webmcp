@@ -40,6 +40,7 @@ function analysisFor(canonical: CanonicalWorkspace): DerivedAnalysis {
       ? [
           {
             id: 'candidate-1',
+            name: 'South of Market — near 1st Street & Howard Street',
             coordinates: [-122.4, 37.78],
             score: 0.8,
             minimumSlack: 0.4,
@@ -47,6 +48,8 @@ function analysisFor(canonical: CanonicalWorkspace): DerivedAnalysis {
             bikeMinutes: 12,
             groceryMinutes: 6,
             parkMinutes: 5,
+            nearestGrocery: 'Real grocery',
+            nearestPark: 'Real park',
             comfortable: ['bike commute', 'grocery access', 'park access'],
             closeToFailing: null,
             tradeoff: 'Balanced fit.',
@@ -86,7 +89,7 @@ describe('WorkspaceService', () => {
     resetStore();
     worker.initialize.mockReset().mockResolvedValue({
       metadata: { datasetVersion: 'test-dataset' },
-      presets: [
+      search: [
         { id: 'market-1', label: SAMPLE_OFFICE.label, coordinates: SAMPLE_OFFICE.coordinates },
       ],
     });
@@ -97,7 +100,7 @@ describe('WorkspaceService', () => {
 
   it('runs the agent location scenario and returns a compact workspace summary', async () => {
     await workspaceService.initialize();
-    const search = await workspaceService.query({ type: 'search-locations', query: '1 Market' });
+    const search = await workspaceService.query({ type: 'search-locations', query: 'City Hall' });
     expect(search.data).toEqual([
       { id: 'market-1', label: SAMPLE_OFFICE.label, coordinates: SAMPLE_OFFICE.coordinates },
     ]);

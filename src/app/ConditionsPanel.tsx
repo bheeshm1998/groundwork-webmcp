@@ -228,7 +228,8 @@ export function ConditionsPanel() {
         )}
       </div>
       <p className="assumption-note">
-        Walking access uses straight-line distance at 1.4 m/s. Bicycle times are modeled estimates.
+        Walking and bicycle times follow the bundled OpenStreetMap street graph. Modeled times do
+        not include live conditions, hills, or closures.
       </p>
     </section>
   );

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { dijkstra, loadGraph, nearestNode, type SerializedAdjacencyGraph } from './graph';
+import {
+  dijkstra,
+  loadGraph,
+  multiSourceDijkstra,
+  nearestNode,
+  type SerializedAdjacencyGraph,
+} from './graph';
 
 const graphFixture: SerializedAdjacencyGraph = {
   format: 'adjacency-v1',
@@ -37,5 +43,25 @@ describe('road graph', () => {
   it('snaps to the nearest graph node', () => {
     const graph = loadGraph(graphFixture);
     expect(nearestNode(graph, [-122.389, 37.7701])).toBe(1);
+  });
+
+  it('uses multi-source graph walking times and leaves a nearby disconnected node unreachable', () => {
+    const walkingFixture: SerializedAdjacencyGraph = {
+      format: 'adjacency-v1',
+      nodes: [
+        [-122.4, 37.77],
+        [-122.399, 37.77],
+        [-122.398, 37.77],
+        [-122.4001, 37.7701],
+      ],
+      offsets: [0, 1, 3, 4, 4],
+      targets: [1, 0, 2, 1],
+      weights: [3, 3, 4, 4],
+    };
+    const result = multiSourceDijkstra(loadGraph(walkingFixture), [0, 2], 10, 'walk');
+
+    expect(result.distances[1]).toBe(3);
+    expect(result.owners[1]).toBe(0);
+    expect(result.distances[3]).toBe(Number.POSITIVE_INFINITY);
   });
 });

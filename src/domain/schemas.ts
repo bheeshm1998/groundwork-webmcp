@@ -137,6 +137,7 @@ export type CanonicalWorkspace = z.infer<typeof CanonicalWorkspaceSchema>;
 
 export interface Candidate {
   id: string;
+  name: string;
   coordinates: Coordinate;
   score: number;
   minimumSlack: number;
@@ -144,6 +145,8 @@ export interface Candidate {
   bikeMinutes: number | null;
   groceryMinutes: number | null;
   parkMinutes: number | null;
+  nearestGrocery: string | null;
+  nearestPark: string | null;
   comfortable: string[];
   closeToFailing: string | null;
   tradeoff: string;

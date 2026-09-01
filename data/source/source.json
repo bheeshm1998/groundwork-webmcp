@@ -1,9 +1,10 @@
 {
-  "source": "Geofabrik California OpenStreetMap extract",
-  "downloadPage": "https://download.geofabrik.de/north-america/us/california.html",
+  "source": "Geofabrik Northern California OpenStreetMap extract; Overpass fallback",
+  "downloadPage": "https://download.geofabrik.de/north-america/us/california/norcal.html",
   "pbfPathEnvironmentVariable": "OSM_PBF_PATH",
   "requiredTool": "osmium-tool",
   "license": "ODbL 1.0",
-  "note": "Pin the downloaded file and record its SHA-256 below before regenerating production assets.",
-  "sha256": ""
+  "overpassEndpoint": "https://overpass-api.de/api/interpreter",
+  "note": "The generated metadata manifest pins the exact source response, extract date, query hash, and SHA-256. Builds fail instead of substituting synthetic data.",
+  "currentExtractSha256": "2e8e567b5c8617de2836f46f6f32cb4cdc12dec31a88a86d660f9c5eb31a5c68"
 }

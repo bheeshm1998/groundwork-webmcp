@@ -1,28 +1,30 @@
 # Groundwork assumptions and constraints
 
-Last reviewed: 2026-08-28
+Last reviewed: 2026-09-01
 
 ## Product scope
 
-- Groundwork is a hackathon demonstration of a human-and-agent spatial decision workflow, not a production routing, real-estate, safety, or accessibility service.
+- Groundwork is a client-side spatial decision aid, not a live routing, real-estate listing, safety, or accessibility service.
 - The supported analysis area is the San Francisco bounding box `[-122.53, 37.69]` to `[-122.34, 37.83]`. Office coordinates outside it are rejected.
 - A workspace may contain one bicycle condition, one grocery condition, one park condition, and one preference drawing. Setting the same type again replaces the prior condition so scoring and explanations remain unambiguous.
 - At least two conditions are required to create a combined feasible region.
 
 ## Shipped data
 
-- The committed `public/data/sf` files are a small deterministic synthetic hackathon dataset. They are not a real OpenStreetMap street graph or a complete POI inventory.
-- UI results and map attribution explicitly say “Demo data” or “Synthetic demo analysis.” Results must not be presented as real-world travel guarantees.
-- A production-quality dataset requires a pinned California OSM PBF, a recorded SHA-256, `osmium-tool`, and `npm run data:build`. The builder supports directional bicycle edges and polygon grocery/park representative points, but generated output still requires a data-quality review before use.
+- The committed `public/data/sf` assets contain a checksum-pinned OpenStreetMap extract plus official DataSF city/county and Analysis Neighborhood polygons. There is no synthetic fallback.
+- Every asset filename is versioned. `metadata.json` records source URLs, extract dates, SHA-256 checksums, counts, graph format, and the dataset version.
+- The street network contracts degree-2 vertices and is shipped as a custom gzip-compressed binary. The build fails at 2 MB or larger.
+- Groceries include named OSM `shop=supermarket`, `shop=grocery`, and `shop=convenience` records. Parks use named `leisure=park` records. Nodes, ways, and relations are included; polygon records use a point on their surface.
+- If `osmium-tool` is unavailable, the build uses a saved and checksummed Overpass response. Fetch, validation, unexpectedly small extract, and graph-budget failures stop the build; generated coordinates or place records are never substituted.
 - Share links are rejected when their dataset version differs from the loaded dataset; there is no cross-version migration.
 
 ## Calculation assumptions
 
-- Walking access is straight-line distance at 1.4 m/s. It does not account for street connectivity, crossings, elevation, barriers, entrances, accessibility, or opening hours.
-- Bicycle minutes use the bundled graph’s modeled edge times and nearest graph node. They do not model traffic, elevation, rider ability, surface quality, construction, or live closures.
+- Walking access uses multi-source Dijkstra from every applicable POI over pedestrian-eligible OSM edges at a modeled 4.8 km/h. It accounts for the extracted street connectivity, but not elevation, untagged barriers, entrance choice, accessibility, opening hours, or temporary closures.
+- Bicycle minutes use directional OSM-eligible edges and modeled road-class speeds. Reachable polygons sample full and partially reachable edges, interpolating the exact time cutoff before polygonization. They do not model traffic, elevation, rider ability, surface quality, construction, or live closures.
 - Grocery type is enforced consistently in both feasible-area construction and candidate scoring. “Supermarket” excludes records typed only as grocery.
 - Every hard condition must produce a valid layer. If any layer is missing or cannot intersect the supported boundary, the combined feasible region is empty rather than silently dropping that condition.
-- Candidate points are generated from H3 cells whose centers are inside the feasible polygon. Regions smaller than a cell use a Turf point-on-feature fallback; the final coordinate is checked against the feasible geometry.
+- Candidate points are generated from H3 cells whose centers are inside the feasible polygon, kept at least 300 m apart, and named with the containing DataSF Analysis Neighborhood plus nearest named OSM cross-street. Regions smaller than a cell use a Turf point-on-feature fallback; the final coordinate is checked against the feasible geometry.
 - Candidate ranking maximizes the weakest normalized margin first and average margin second. It is deterministic but is not a statistical recommendation or market ranking.
 - Condition layers are cached in the worker for the 50 most recent exact inputs. Calculations are synchronous inside the worker and cannot currently be cancelled mid-operation; the UI prevents conflicting mutations while one runs.
 
@@ -36,13 +38,13 @@ Last reviewed: 2026-08-28
 
 ## Browser, map, and WebMCP constraints
 
-- Base-map tiles and optional geocoding require network access. Analysis data and calculations remain local. A failed map/style load shows a retryable fallback while panel results remain usable.
-- Without `VITE_MAPTILER_KEY`, Groundwork uses OpenFreeMap and only the bundled location presets are guaranteed for search. Public MapTiler keys must be origin-restricted.
+- Base-map tiles require network access. Analysis, pedestrian/bicycle routing, candidate naming, and search remain local. A failed map/style load shows a retryable fallback while panel results remain usable.
+- Search uses the bundled OSM index of named POIs and street names. `VITE_MAPTILER_KEY` changes only the base-map provider; public keys must be origin-restricted.
 - Browsers without `document.modelContext` run in manual mode. The page does not claim agent tools are registered in that mode.
 - A deployed WebMCP release requires `VITE_WEBMCP_ORIGIN_TRIAL_TOKEN` for the exact final origin. `npm run build:release` and the Vercel build fail if it is absent. Ordinary `npm run build` intentionally remains available for local/manual verification and omits an empty origin-trial tag.
 - WebMCP write results are compact summaries; full GeoJSON stays inside the page. Capability changes are diffed so unrelated state updates do not abort and re-register stable tools.
 
 ## Release constraints
 
-- The current project is suitable only for a clearly labeled hackathon demo while the synthetic dataset remains committed.
-- Before representing Groundwork as real-world analysis: replace the dataset, pin and record its source checksum, review POI coverage and network directionality, run a deployed-origin WebMCP smoke test, and validate results against an independent routing source.
+- Before describing a release as current, rebuild and review the source checksums, POI coverage, graph directionality, and DataSF boundary versions.
+- A release still requires a deployed-origin WebMCP smoke test and comparison against an independent routing source. Real source data removes fabrication; it does not turn modeled travel time into a guarantee.

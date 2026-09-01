@@ -7,9 +7,11 @@ import type {
   DerivedAnalysis,
   OperationState,
 } from '../domain/schemas';
+import type { DatasetMetadata } from '../geo-worker/api';
 
 export interface WorkspaceStore {
   datasetVersion: string;
+  datasetMetadata: DatasetMetadata | null;
   canonical: CanonicalWorkspace;
   derived: DerivedAnalysis;
   activity: ActivityEntry[];
@@ -24,6 +26,7 @@ export interface WorkspaceStore {
 
 export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   datasetVersion: DATASET_VERSION,
+  datasetMetadata: null,
   canonical: structuredClone(EMPTY_CANONICAL),
   derived: structuredClone(EMPTY_DERIVED),
   activity: [],

@@ -1,6 +1,6 @@
 import type { CanonicalWorkspace, DerivedAnalysis } from './schemas';
 
-export const DATASET_VERSION = 'sf-demo-2026-08-27';
+export const DATASET_VERSION = 'sf-osm-datasf-2026-09-01-v2';
 export const SF_CENTER: [number, number] = [-122.425, 37.7749];
 export const SF_BOUNDS: [[number, number], [number, number]] = [
   [-122.53, 37.69],
@@ -25,6 +25,6 @@ export const EMPTY_DERIVED: DerivedAnalysis = {
 };
 
 export const SAMPLE_OFFICE = {
-  label: '1 Market Street, San Francisco',
-  coordinates: [-122.3949, 37.7936] as [number, number],
+  label: 'San Francisco City Hall',
+  coordinates: [-122.4192315, 37.7792763] as [number, number],
 };

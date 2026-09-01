@@ -1,14 +1,12 @@
 import area from '@turf/area';
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
-import buffer from '@turf/buffer';
 import cleanCoords from '@turf/clean-coords';
 import distance from '@turf/distance';
 import intersect from '@turf/intersect';
 import pointOnFeature from '@turf/point-on-feature';
-import union from '@turf/union';
 import { featureCollection, point } from '@turf/helpers';
 import { cellToLatLng, cellsToMultiPolygon, gridDisk, latLngToCell, polygonToCells } from 'h3-js';
-import type { Feature, MultiPolygon, Polygon } from 'geojson';
+import type { Feature, FeatureCollection, MultiPolygon, Polygon } from 'geojson';
 import type {
   AreaGeometry,
   Candidate,
@@ -18,23 +16,36 @@ import type {
   DerivedAnalysis,
   RestrictionResult,
 } from '../domain/schemas';
-import { dijkstra, loadGraph, nearestNode, type GraphData, type SerializedGraph } from './graph';
+import {
+  dijkstra,
+  multiSourceDijkstra,
+  nearestNode,
+  nearestNodeForMode,
+  type GraphData,
+  type TravelMode,
+} from './graph';
 
 export interface PlaceRecord {
   id: string;
   name: string;
   coordinates: Coordinate;
-  type?: 'supermarket' | 'grocery';
+  type?: 'supermarket' | 'grocery' | 'convenience';
 }
 
 export interface PlacesData {
   groceries: PlaceRecord[];
   parks: PlaceRecord[];
-  presets: Array<{ id: string; label: string; coordinates: Coordinate }>;
+  search: Array<{ id: string; label: string; coordinates: Coordinate; kind: 'poi' | 'street' }>;
 }
 
 interface BikeContext {
   distances: Float32Array;
+}
+
+interface AccessContext {
+  distances: Float32Array;
+  owners: Int32Array;
+  places: PlaceRecord[];
 }
 
 function asArea(feature: Feature<Polygon | MultiPolygon>): AreaGeometry {
@@ -50,14 +61,6 @@ function safeIntersect(a: AreaGeometry, b: AreaGeometry): AreaGeometry | null {
   }
 }
 
-function unionAreas(features: AreaGeometry[]): AreaGeometry | null {
-  if (features.length === 0) return null;
-  if (features.length === 1) return features[0] ?? null;
-  const result = union(featureCollection(features));
-  if (!result) throw new Error('The access areas could not be merged safely.');
-  return asArea(cleanCoords(result));
-}
-
 function combineAreas(boundary: AreaGeometry, features: AreaGeometry[]): AreaGeometry | null {
   let current: AreaGeometry | null = boundary;
   for (const feature of features) {
@@ -67,27 +70,59 @@ function combineAreas(boundary: AreaGeometry, features: AreaGeometry[]): AreaGeo
   return current;
 }
 
-function nearestMinutes(origin: Coordinate, places: PlaceRecord[]): number {
-  let closest = Number.POSITIVE_INFINITY;
-  for (const place of places) {
-    closest = Math.min(
-      closest,
-      distance(point(origin), point(place.coordinates), { units: 'kilometers' }) / 0.084,
-    );
+function nearestReachedNode(graph: GraphData, coordinate: Coordinate, distances: Float32Array) {
+  let closest = -1;
+  let closestSquared = Number.POSITIVE_INFINITY;
+  const lngScale = Math.cos(coordinate[1] * (Math.PI / 180));
+  for (let index = 0; index < distances.length; index += 1) {
+    if (!Number.isFinite(distances[index]!)) continue;
+    const dx = (graph.lng[index]! - coordinate[0]) * lngScale;
+    const dy = graph.lat[index]! - coordinate[1];
+    const squared = dx * dx + dy * dy;
+    if (squared < closestSquared) {
+      closestSquared = squared;
+      closest = index;
+    }
   }
   return closest;
 }
 
-function makeBikeArea(
+function makeNetworkArea(
   graph: GraphData,
   distances: Float32Array,
+  cutoffMinutes: number,
+  mode: TravelMode,
   boundary: AreaGeometry,
 ): AreaGeometry | null {
   const cells = new Set<string>();
+  const weights = mode === 'bike' ? graph.bikeWeights : graph.walkWeights;
   for (let index = 0; index < distances.length; index += 1) {
-    if (!Number.isFinite(distances[index])) continue;
-    const cell = latLngToCell(graph.lat[index]!, graph.lng[index]!, 10);
-    for (const nearby of gridDisk(cell, 1)) cells.add(nearby);
+    const reachedAt = distances[index]!;
+    if (!Number.isFinite(reachedAt)) continue;
+    for (let edge = graph.offsets[index]!; edge < graph.offsets[index + 1]!; edge += 1) {
+      const weight = weights[edge]!;
+      if (!Number.isFinite(weight) || weight <= 0) continue;
+      const target = graph.targets[edge]!;
+      const fraction = Math.max(0, Math.min(1, (cutoffMinutes - reachedAt) / weight));
+      if (fraction <= 0) continue;
+      const from: Coordinate = [graph.lng[index]!, graph.lat[index]!];
+      const to: Coordinate = [graph.lng[target]!, graph.lat[target]!];
+      const partial: Coordinate = [
+        from[0] + (to[0] - from[0]) * fraction,
+        from[1] + (to[1] - from[1]) * fraction,
+      ];
+      const segmentKm = distance(point(from), point(partial), { units: 'kilometers' });
+      const samples = Math.max(1, Math.ceil(segmentKm / 0.08));
+      for (let sample = 0; sample <= samples; sample += 1) {
+        const progress = sample / samples;
+        const coordinate: Coordinate = [
+          from[0] + (partial[0] - from[0]) * progress,
+          from[1] + (partial[1] - from[1]) * progress,
+        ];
+        const cell = latLngToCell(coordinate[1], coordinate[0], 10);
+        for (const nearby of gridDisk(cell, 1)) cells.add(nearby);
+      }
+    }
   }
   if (cells.size === 0) return null;
   const coordinates = cellsToMultiPolygon([...cells], true) as MultiPolygon['coordinates'];
@@ -99,39 +134,30 @@ function makeBikeArea(
   return safeIntersect(polygon, boundary);
 }
 
-function pointBuffers(
-  places: PlaceRecord[],
-  maxMinutes: number,
-  boundary: AreaGeometry,
-): AreaGeometry | null {
-  const radiusKm = maxMinutes * 0.084;
-  const areas = places
-    .map((place) => buffer(point(place.coordinates), radiusKm, { units: 'kilometers', steps: 16 }))
-    .filter((feature): feature is Feature<Polygon | MultiPolygon> => Boolean(feature))
-    .map(asArea);
-  const merged = unionAreas(areas);
-  return merged ? safeIntersect(merged, boundary) : null;
-}
-
 export class GeoEngine {
   readonly graph: GraphData;
   private readonly conditionCache = new Map<
     string,
-    { layer: AreaGeometry | null; bike?: BikeContext }
+    { layer: AreaGeometry | null; bike?: BikeContext; access?: AccessContext }
   >();
 
   constructor(
-    graphSpec: SerializedGraph,
+    graph: GraphData,
     readonly places: PlacesData,
     readonly boundary: AreaGeometry,
+    readonly neighborhoods: FeatureCollection<Polygon | MultiPolygon> = {
+      type: 'FeatureCollection',
+      features: [],
+    },
+    readonly nodeLabels: Array<string | null> = [],
   ) {
-    this.graph = loadGraph(graphSpec);
+    this.graph = graph;
   }
 
   private computeConditionLayer(
     canonical: CanonicalWorkspace,
     condition: Condition,
-  ): { layer: AreaGeometry | null; bike?: BikeContext } {
+  ): { layer: AreaGeometry | null; bike?: BikeContext; access?: AccessContext } {
     if (condition.kind === 'preference') {
       return { layer: safeIntersect(condition.geometry as AreaGeometry, this.boundary) };
     }
@@ -143,18 +169,37 @@ export class GeoEngine {
               (place) =>
                 condition.groceryType === 'supermarket_or_grocery' || place.type === 'supermarket',
             );
-      return { layer: pointBuffers(places, condition.maxMinutes, this.boundary) };
+      const origins = places.map((place) =>
+        nearestNodeForMode(this.graph, place.coordinates, 'walk'),
+      );
+      const access = {
+        ...multiSourceDijkstra(this.graph, origins, condition.maxMinutes, 'walk'),
+        places,
+      };
+      return {
+        layer: makeNetworkArea(
+          this.graph,
+          access.distances,
+          condition.maxMinutes,
+          'walk',
+          this.boundary,
+        ),
+        access,
+      };
     }
     if (!canonical.office) return { layer: null };
-    const origin = nearestNode(this.graph, canonical.office.coordinates);
+    const origin = nearestNodeForMode(this.graph, canonical.office.coordinates, 'bike');
     const distances = dijkstra(this.graph, origin, condition.maxMinutes);
-    return { layer: makeBikeArea(this.graph, distances, this.boundary), bike: { distances } };
+    return {
+      layer: makeNetworkArea(this.graph, distances, condition.maxMinutes, 'bike', this.boundary),
+      bike: { distances },
+    };
   }
 
   private cachedConditionLayer(
     canonical: CanonicalWorkspace,
     condition: Condition,
-  ): { layer: AreaGeometry | null; bike?: BikeContext } {
+  ): { layer: AreaGeometry | null; bike?: BikeContext; access?: AccessContext } {
     const key = JSON.stringify({
       condition,
       office: condition.kind === 'bike' ? canonical.office?.coordinates : undefined,
@@ -173,10 +218,12 @@ export class GeoEngine {
   analyze(canonical: CanonicalWorkspace): DerivedAnalysis {
     const layers: Record<string, AreaGeometry> = {};
     const bikeContexts: Record<string, BikeContext> = {};
+    const accessContexts: Record<string, AccessContext> = {};
     for (const condition of canonical.conditions) {
       const result = this.cachedConditionLayer(canonical, condition);
       if (result.layer) layers[condition.id] = result.layer;
       if (result.bike) bikeContexts[condition.id] = result.bike;
+      if (result.access) accessContexts[condition.id] = result.access;
     }
 
     const hasMissingCondition = canonical.conditions.some((condition) => !layers[condition.id]);
@@ -188,7 +235,9 @@ export class GeoEngine {
           )
         : null;
     const feasibleAreaKm2 = feasibleRegion ? area(feasibleRegion) / 1_000_000 : 0;
-    const candidates = feasibleRegion ? this.rank(canonical, feasibleRegion, bikeContexts) : [];
+    const candidates = feasibleRegion
+      ? this.rank(canonical, feasibleRegion, bikeContexts, accessContexts)
+      : [];
     const restriction =
       feasibleRegion || canonical.combined
         ? this.restriction(canonical, layers, feasibleRegion)
@@ -200,6 +249,7 @@ export class GeoEngine {
     canonical: CanonicalWorkspace,
     feasible: AreaGeometry,
     bikeContexts: Record<string, BikeContext>,
+    accessContexts: Record<string, AccessContext>,
   ): Candidate[] {
     const bikeConditions = canonical.conditions.filter(
       (condition): condition is Extract<Condition, { kind: 'bike' }> => condition.kind === 'bike',
@@ -246,55 +296,53 @@ export class GeoEngine {
     for (const [id, center] of seeds) {
       const bikeMinutes = bikeConditions.length
         ? Math.max(
-            ...bikeConditions.map((condition) =>
-              bikeContexts[condition.id]
-                ? (bikeContexts[condition.id]!.distances[nearestNode(this.graph, center)] ??
-                  Number.POSITIVE_INFINITY)
-                : Number.POSITIVE_INFINITY,
-            ),
+            ...bikeConditions.map((condition) => {
+              const context = bikeContexts[condition.id];
+              const node = context ? nearestReachedNode(this.graph, center, context.distances) : -1;
+              return node >= 0 ? context!.distances[node]! : Number.POSITIVE_INFINITY;
+            }),
           )
         : null;
-      const groceryMinutes = groceryConditions.length
-        ? Math.max(
-            ...groceryConditions.map((condition) =>
-              nearestMinutes(
-                center,
-                this.places.groceries.filter(
-                  (place) =>
-                    condition.groceryType === 'supermarket_or_grocery' ||
-                    place.type === 'supermarket',
-                ),
-              ),
-            ),
-          )
-        : null;
-      const parkMinutes = parkConditions.length ? nearestMinutes(center, this.places.parks) : null;
+      const groceryAccess = groceryConditions[0]
+        ? accessContexts[groceryConditions[0].id]
+        : undefined;
+      const parkAccess = parkConditions[0] ? accessContexts[parkConditions[0].id] : undefined;
+      const groceryNode = groceryAccess
+        ? nearestReachedNode(this.graph, center, groceryAccess.distances)
+        : -1;
+      const parkNode = parkAccess
+        ? nearestReachedNode(this.graph, center, parkAccess.distances)
+        : -1;
+      const groceryMinutes = groceryNode >= 0 ? groceryAccess!.distances[groceryNode]! : null;
+      const parkMinutes = parkNode >= 0 ? parkAccess!.distances[parkNode]! : null;
+      const groceryOwner = groceryNode >= 0 ? groceryAccess!.owners[groceryNode]! : -1;
+      const parkOwner = parkNode >= 0 ? parkAccess!.owners[parkNode]! : -1;
+      const nearestGrocery =
+        groceryOwner >= 0 ? (groceryAccess?.places[groceryOwner]?.name ?? null) : null;
+      const nearestPark = parkOwner >= 0 ? (parkAccess?.places[parkOwner]?.name ?? null) : null;
       const margins: Array<{ label: string; slack: number }> = [];
       for (const bike of bikeConditions) {
         const context = bikeContexts[bike.id];
-        const minutes = context
-          ? (context.distances[nearestNode(this.graph, center)] ?? Number.POSITIVE_INFINITY)
-          : Number.POSITIVE_INFINITY;
+        const node = context ? nearestReachedNode(this.graph, center, context.distances) : -1;
+        const minutes = node >= 0 ? context!.distances[node]! : Number.POSITIVE_INFINITY;
         margins.push({
           label: 'bike commute',
           slack: (bike.maxMinutes - minutes) / bike.maxMinutes,
         });
       }
       for (const grocery of groceryConditions) {
-        const minutes = nearestMinutes(
-          center,
-          this.places.groceries.filter(
-            (place) =>
-              grocery.groceryType === 'supermarket_or_grocery' || place.type === 'supermarket',
-          ),
-        );
+        const context = accessContexts[grocery.id];
+        const node = context ? nearestReachedNode(this.graph, center, context.distances) : -1;
+        const minutes = node >= 0 ? context!.distances[node]! : Number.POSITIVE_INFINITY;
         margins.push({
           label: 'grocery access',
           slack: (grocery.maxMinutes - minutes) / grocery.maxMinutes,
         });
       }
       for (const park of parkConditions) {
-        const minutes = nearestMinutes(center, this.places.parks);
+        const context = accessContexts[park.id];
+        const node = context ? nearestReachedNode(this.graph, center, context.distances) : -1;
+        const minutes = node >= 0 ? context!.distances[node]! : Number.POSITIVE_INFINITY;
         margins.push({
           label: 'park access',
           slack: (park.maxMinutes - minutes) / park.maxMinutes,
@@ -309,17 +357,21 @@ export class GeoEngine {
       const comfortable = margins.filter(({ slack }) => slack >= 0.25).map(({ label }) => label);
       scored.push({
         id,
+        name: '',
         coordinates: center,
         score: minimumSlack * 0.7 + averageSlack * 0.3,
         minimumSlack,
         averageSlack,
         bikeMinutes: bikeMinutes !== null && Number.isFinite(bikeMinutes) ? bikeMinutes : null,
-        groceryMinutes,
-        parkMinutes,
+        groceryMinutes:
+          groceryMinutes !== null && Number.isFinite(groceryMinutes) ? groceryMinutes : null,
+        parkMinutes: parkMinutes !== null && Number.isFinite(parkMinutes) ? parkMinutes : null,
+        nearestGrocery,
+        nearestPark,
         comfortable,
         closeToFailing: weakest && weakest.slack <= 0.1 ? weakest.label : null,
         tradeoff: weakest
-          ? `Strong overall fit; ${weakest.label} has the least remaining margin.`
+          ? `${weakest.label} has the least remaining margin${nearestGrocery ? `; nearest grocery is ${nearestGrocery}` : ''}${nearestPark ? ` and nearest park is ${nearestPark}` : ''}.`
           : 'Inside the current preference area.',
       });
     }
@@ -337,18 +389,37 @@ export class GeoEngine {
           (existing) =>
             distance(point(existing.coordinates), point(candidate.coordinates), {
               units: 'kilometers',
-            }) >= 0.25,
+            }) >= 0.3,
         )
       ) {
         selected.push(candidate);
       }
       if (selected.length === 3) break;
     }
-    for (const candidate of scored) {
-      if (selected.length === 3) break;
-      if (!selected.some(({ id }) => id === candidate.id)) selected.push(candidate);
-    }
+    for (const candidate of selected) candidate.name = this.candidateName(candidate.coordinates);
     return selected;
+  }
+
+  private candidateName(coordinate: Coordinate) {
+    const neighborhood = this.neighborhoods.features.find((feature) =>
+      booleanPointInPolygon(point(coordinate), feature),
+    )?.properties?.nhood as string | undefined;
+    let nearestLabel: string | null = null;
+    let nearestSquared = Number.POSITIVE_INFINITY;
+    const lngScale = Math.cos(coordinate[1] * (Math.PI / 180));
+    for (let index = 0; index < this.nodeLabels.length; index += 1) {
+      const label = this.nodeLabels[index];
+      if (!label?.includes(' & ')) continue;
+      const dx = (this.graph.lng[index]! - coordinate[0]) * lngScale;
+      const dy = this.graph.lat[index]! - coordinate[1];
+      const squared = dx * dx + dy * dy;
+      if (squared < nearestSquared) {
+        nearestSquared = squared;
+        nearestLabel = label;
+      }
+    }
+    if (!nearestLabel) nearestLabel = this.nodeLabels[nearestNode(this.graph, coordinate)] ?? null;
+    return [neighborhood, nearestLabel ? `near ${nearestLabel}` : null].filter(Boolean).join(' — ');
   }
 
   private restriction(

@@ -55,20 +55,22 @@ export function OnboardingPanel() {
     }
   };
 
-  if (office && !editingStart) {
+  if ((office || conditionCount > 0) && !editingStart) {
     return (
       <section
         className="panel onboarding-panel compact-onboarding"
         aria-labelledby="decision-heading"
       >
         <div className="eyebrow">Decision setup</div>
-        <h1 id="decision-heading">Office selected</h1>
-        <div className="office-chip">
-          <span aria-hidden="true">◆</span>
-          {office.label}
-        </div>
+        <h1 id="decision-heading">{office ? 'Office selected' : 'Setup in progress'}</h1>
+        {office ? (
+          <div className="office-chip">
+            <span aria-hidden="true">◆</span>
+            {office.label}
+          </div>
+        ) : null}
         <button type="button" onClick={() => setEditingStart(true)}>
-          Change office or sample
+          Edit office or sample
         </button>
       </section>
     );
@@ -83,8 +85,8 @@ export function OnboardingPanel() {
         and editable.
       </p>
       <blockquote>
-        “Find me a place under a 25-minute bike ride from 1 Market Street, within 10 minutes of
-        groceries and 8 minutes of a park.”
+        “Find me a place under a 25-minute bike ride from San Francisco City Hall, within 10 minutes
+        of groceries and 8 minutes of a park.”
       </blockquote>
       <button
         className="primary-button"
@@ -111,7 +113,7 @@ export function OnboardingPanel() {
             id="office-search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="1 Market Street"
+            placeholder="San Francisco City Hall"
             minLength={2}
           />
           <button

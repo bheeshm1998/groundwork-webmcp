@@ -86,14 +86,12 @@ button:disabled {
   align-items: center;
   gap: 8px;
 }
-.demo-badge {
+.provenance-chip {
   padding: 3px 7px;
-  border: 1px solid rgba(240, 164, 60, 0.4);
+  border: 1px solid rgba(217, 255, 90, 0.3);
   border-radius: 999px;
-  color: #ffc168;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 9px;
+  color: var(--lime);
+  font-size: 10px;
 }
 .status-dot {
   width: 7px;
@@ -533,6 +531,23 @@ input {
 .candidate-warning {
   color: #ffc168;
 }
+.method-panel {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.method-panel summary {
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 700;
+}
+.method-panel p:last-child {
+  margin-bottom: 0;
+}
 
 .agent-count {
   color: var(--muted);
@@ -661,11 +676,16 @@ input {
 
 @media (max-width: 780px) {
   .workspace-grid {
-    display: block;
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
+  }
+  .workspace-grid.has-started .map-region {
+    order: -1;
   }
   .sidebar {
     overflow: visible;
+    flex-shrink: 0;
   }
   .map-region {
     height: min(58vh, 520px);
@@ -678,7 +698,14 @@ input {
     box-shadow: none;
   }
   .topbar-status {
-    display: none;
+    font-size: 0;
+  }
+  .topbar-status .provenance-chip {
+    display: inline-block;
+    max-width: 210px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

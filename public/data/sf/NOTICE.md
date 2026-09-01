@@ -1,8 +1,9 @@
 # Dataset notice
 
-Groundwork is designed for OpenStreetMap data and displays the required
-`© OpenStreetMap contributors` attribution. The checked-in compact dataset is a
-small deterministic demo asset for the San Francisco hackathon flow. Run
-`npm run data:build` with a pinned California PBF and `osmium-tool` to produce a
-fresh extract before treating the travel estimates as production analysis.
+Groundwork displays the required `© OpenStreetMap contributors` attribution.
+The checked-in, versioned assets are derived from the real source extracts
+listed with retrieval dates and SHA-256 checksums in `metadata.json`.
 
+OpenStreetMap-derived records are available under ODbL 1.0. DataSF boundary and
+Analysis Neighborhood records are public data under the license recorded in the
+manifest. Modeled travel time is a planning estimate, not a guarantee.

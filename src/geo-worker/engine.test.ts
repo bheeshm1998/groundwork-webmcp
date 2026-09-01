@@ -3,7 +3,7 @@ import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 import { point } from '@turf/helpers';
 import type { AreaGeometry, CanonicalWorkspace } from '../domain/schemas';
 import { GeoEngine } from './engine';
-import type { CompactGraphSpec } from './graph';
+import { loadGraph, type CompactGraphSpec } from './graph';
 
 const graph: CompactGraphSpec = {
   format: 'compact-grid-v1',
@@ -44,7 +44,7 @@ const places = {
     },
   ],
   parks: [{ id: 'p1', name: 'Park', coordinates: [-122.42, 37.77] as [number, number] }],
-  presets: [],
+  search: [],
 };
 
 function workspace(): CanonicalWorkspace {
@@ -78,8 +78,19 @@ function workspace(): CanonicalWorkspace {
 }
 
 describe('GeoEngine', () => {
+  it('builds one connected bicycle polygon by interpolating reachable edge cutoffs', () => {
+    const bikeOnly = workspace();
+    bikeOnly.conditions = [bikeOnly.conditions[0]!];
+    bikeOnly.combined = false;
+    const result = new GeoEngine(loadGraph(graph), places, boundary).analyze(bikeOnly);
+    const layer = result.layers.bike!;
+
+    expect(layer).toBeDefined();
+    expect(layer.geometry.type === 'Polygon' || layer.geometry.coordinates.length === 1).toBe(true);
+  });
+
   it('creates visible condition layers and a deterministic result', () => {
-    const result = new GeoEngine(graph, places, boundary).analyze(workspace());
+    const result = new GeoEngine(loadGraph(graph), places, boundary).analyze(workspace());
     expect(Object.keys(result.layers)).toEqual(['bike', 'grocery', 'park']);
     expect(result.feasibleAreaKm2).toBeGreaterThanOrEqual(0);
     expect(result.restriction?.conditionId).toBeTruthy();
@@ -87,7 +98,7 @@ describe('GeoEngine', () => {
   });
 
   it('honors removed candidates on the next ranking pass', () => {
-    const engine = new GeoEngine(graph, places, boundary);
+    const engine = new GeoEngine(loadGraph(graph), places, boundary);
     const first = engine.analyze(workspace());
     if (!first.candidates[0]) return;
     const nextWorkspace = workspace();
@@ -108,7 +119,7 @@ describe('GeoEngine', () => {
         },
       ],
     };
-    const result = new GeoEngine(graph, noSupermarkets, boundary).analyze(workspace());
+    const result = new GeoEngine(loadGraph(graph), noSupermarkets, boundary).analyze(workspace());
 
     expect(result.layers.grocery).toBeUndefined();
     expect(result.feasibleRegion).toBeNull();
@@ -117,9 +128,9 @@ describe('GeoEngine', () => {
   });
 
   it('uses only supermarkets for supermarket candidate metrics', () => {
-    const baseline = new GeoEngine(graph, places, boundary).analyze(workspace());
+    const baseline = new GeoEngine(loadGraph(graph), places, boundary).analyze(workspace());
     const withNearbyGrocery = new GeoEngine(
-      graph,
+      loadGraph(graph),
       {
         ...places,
         groceries: [
@@ -174,7 +185,7 @@ describe('GeoEngine', () => {
         maxMinutes: 45,
       },
     ];
-    const result = new GeoEngine(graph, places, boundary).analyze(tiny);
+    const result = new GeoEngine(loadGraph(graph), places, boundary).analyze(tiny);
 
     expect(result.feasibleAreaKm2).toBeGreaterThan(0);
     expect(result.candidates.length).toBeGreaterThan(0);
@@ -183,5 +194,25 @@ describe('GeoEngine', () => {
         true,
       );
     }
+  });
+
+  it('names candidates from the containing DataSF neighborhood and nearest named cross-street', () => {
+    const neighborhoods = {
+      type: 'FeatureCollection' as const,
+      features: [
+        {
+          type: 'Feature' as const,
+          properties: { nhood: 'Mission' },
+          geometry: boundary.geometry,
+        },
+      ],
+    };
+    const labels = new Array(loadGraph(graph).lng.length).fill(null) as Array<string | null>;
+    labels[55] = 'Valencia Street & 18th Street';
+    const result = new GeoEngine(loadGraph(graph), places, boundary, neighborhoods, labels).analyze(
+      workspace(),
+    );
+
+    expect(result.candidates[0]?.name).toMatch(/^Mission — near Valencia Street & 18th Street$/u);
   });
 });

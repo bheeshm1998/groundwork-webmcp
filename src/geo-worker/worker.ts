@@ -3,37 +3,53 @@ import { expose } from 'comlink';
 import type { AreaGeometry } from '../domain/schemas';
 import type { GeoWorkerApi } from './api';
 import { GeoEngine, type PlacesData } from './engine';
-import type { SerializedGraph } from './graph';
+import { decodeGraphBinary } from './graph';
+import { gunzipSync } from 'fflate';
+import type { FeatureCollection, MultiPolygon, Polygon } from 'geojson';
+import type { DatasetMetadata } from './api';
 
 let engine: GeoEngine | null = null;
 
 const api: GeoWorkerApi = {
   async initialize() {
-    const [graphResponse, placesResponse, boundaryResponse, metadataResponse] = await Promise.all([
-      fetch('/data/sf/graph.json'),
-      fetch('/data/sf/places.json'),
-      fetch('/data/sf/boundary.geojson'),
-      fetch('/data/sf/metadata.json'),
-    ]);
+    const metadataResponse = await fetch('/data/sf/metadata.json');
+    if (!metadataResponse.ok)
+      throw new Error('The San Francisco dataset manifest could not be loaded.');
+    const loadedMetadata = (await metadataResponse.json()) as DatasetMetadata;
+    const [graphResponse, placesResponse, boundaryResponse, neighborhoodsResponse, labelsResponse] =
+      await Promise.all([
+        fetch(`/data/sf/${loadedMetadata.assets.graph}`),
+        fetch(`/data/sf/${loadedMetadata.assets.places}`),
+        fetch(`/data/sf/${loadedMetadata.assets.boundary}`),
+        fetch(`/data/sf/${loadedMetadata.assets.neighborhoods}`),
+        fetch(`/data/sf/${loadedMetadata.assets.nodeLabels}`),
+      ]);
     if (
-      ![graphResponse, placesResponse, boundaryResponse, metadataResponse].every(
-        (response) => response.ok,
-      )
+      ![
+        graphResponse,
+        placesResponse,
+        boundaryResponse,
+        neighborhoodsResponse,
+        labelsResponse,
+      ].every((response) => response.ok)
     ) {
       throw new Error('The San Francisco analysis dataset could not be loaded.');
     }
-    const [graph, loadedPlaces, boundary, loadedMetadata] = await Promise.all([
-      graphResponse.json() as Promise<SerializedGraph>,
+    const [graphBytes, loadedPlaces, boundary, neighborhoods, nodeLabels] = await Promise.all([
+      graphResponse.arrayBuffer(),
       placesResponse.json() as Promise<PlacesData>,
       boundaryResponse.json() as Promise<AreaGeometry>,
-      metadataResponse.json() as Promise<{
-        datasetVersion: string;
-        source: string;
-        attribution: string;
-      }>,
+      neighborhoodsResponse.json() as Promise<FeatureCollection<Polygon | MultiPolygon>>,
+      labelsResponse.json() as Promise<Array<string | null>>,
     ]);
-    engine = new GeoEngine(graph, loadedPlaces, boundary);
-    return { metadata: loadedMetadata, presets: loadedPlaces.presets };
+    const transportedGraph = new Uint8Array(graphBytes);
+    const graphBinary =
+      transportedGraph[0] === 0x1f && transportedGraph[1] === 0x8b
+        ? gunzipSync(transportedGraph)
+        : transportedGraph;
+    const graph = decodeGraphBinary(graphBinary);
+    engine = new GeoEngine(graph, loadedPlaces, boundary, neighborhoods, nodeLabels);
+    return { metadata: loadedMetadata, search: loadedPlaces.search };
   },
   async analyze(canonical) {
     if (!engine) throw new Error('The analysis engine is not initialized.');

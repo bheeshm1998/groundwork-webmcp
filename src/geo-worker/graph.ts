@@ -17,7 +17,8 @@ export interface GraphData {
   lat: Float64Array;
   offsets: Uint32Array;
   targets: Uint32Array;
-  weights: Float32Array;
+  bikeWeights: Float32Array;
+  walkWeights: Float32Array;
 }
 
 export interface SerializedAdjacencyGraph {
@@ -112,7 +113,8 @@ export function expandCompactGraph(spec: CompactGraphSpec): GraphData {
     lat: Float64Array.from(coordinates.map(([, lat]) => lat)),
     offsets,
     targets,
-    weights,
+    bikeWeights: weights,
+    walkWeights: Float32Array.from(weights, (weight) => weight * (spec.bikeSpeedKph / 4.8)),
   };
 }
 
@@ -123,15 +125,77 @@ export function loadGraph(spec: SerializedGraph): GraphData {
     lat: Float64Array.from(spec.nodes.map(([, lat]) => lat)),
     offsets: Uint32Array.from(spec.offsets),
     targets: Uint32Array.from(spec.targets),
-    weights: Float32Array.from(spec.weights),
+    bikeWeights: Float32Array.from(spec.weights),
+    walkWeights: Float32Array.from(spec.weights),
   };
 }
 
+export function decodeGraphBinary(bytes: Uint8Array): GraphData {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const magic = new TextDecoder().decode(bytes.subarray(0, 4));
+  if (magic !== 'GWG2') throw new Error('Unsupported Groundwork graph binary.');
+  const nodeCount = view.getUint32(4, true);
+  const edgeCount = view.getUint32(8, true);
+  const expectedBytes = 12 + nodeCount * 8 + (nodeCount + 1) * 4 + edgeCount * 8;
+  if (bytes.byteLength !== expectedBytes)
+    throw new Error('The Groundwork graph binary is truncated.');
+  const lng = new Float64Array(nodeCount);
+  const lat = new Float64Array(nodeCount);
+  let cursor = 12;
+  for (let index = 0; index < nodeCount; index += 1) {
+    lng[index] = view.getInt32(cursor, true) / 1_000_000;
+    lat[index] = view.getInt32(cursor + 4, true) / 1_000_000;
+    cursor += 8;
+  }
+  const offsets = new Uint32Array(nodeCount + 1);
+  for (let index = 0; index <= nodeCount; index += 1) {
+    offsets[index] = view.getUint32(cursor, true);
+    cursor += 4;
+  }
+  const targets = new Uint32Array(edgeCount);
+  for (let index = 0; index < edgeCount; index += 1) {
+    targets[index] = view.getUint32(cursor, true);
+    cursor += 4;
+  }
+  const decodeWeight = (value: number) =>
+    value === 65_535 ? Number.POSITIVE_INFINITY : value / 100;
+  const bikeWeights = new Float32Array(edgeCount);
+  const walkWeights = new Float32Array(edgeCount);
+  for (let index = 0; index < edgeCount; index += 1) {
+    bikeWeights[index] = decodeWeight(view.getUint16(cursor, true));
+    cursor += 2;
+  }
+  for (let index = 0; index < edgeCount; index += 1) {
+    walkWeights[index] = decodeWeight(view.getUint16(cursor, true));
+    cursor += 2;
+  }
+  return { lng, lat, offsets, targets, bikeWeights, walkWeights };
+}
+
 export function nearestNode(graph: GraphData, coordinate: Coordinate): number {
+  return nearestNodeForMode(graph, coordinate);
+}
+
+export function nearestNodeForMode(
+  graph: GraphData,
+  coordinate: Coordinate,
+  mode?: TravelMode,
+): number {
   let closest = 0;
   let closestSquared = Number.POSITIVE_INFINITY;
   const lngScale = Math.cos(coordinate[1] * (Math.PI / 180));
   for (let index = 0; index < graph.lng.length; index += 1) {
+    if (mode) {
+      const weights = mode === 'bike' ? graph.bikeWeights : graph.walkWeights;
+      let eligible = false;
+      for (let edge = graph.offsets[index]!; edge < graph.offsets[index + 1]!; edge += 1) {
+        if (Number.isFinite(weights[edge]!)) {
+          eligible = true;
+          break;
+        }
+      }
+      if (!eligible) continue;
+    }
     const dx = (graph.lng[index]! - coordinate[0]) * lngScale;
     const dy = graph.lat[index]! - coordinate[1];
     const squared = dx * dx + dy * dy;
@@ -183,11 +247,24 @@ class MinHeap {
   }
 }
 
-export function dijkstra(graph: GraphData, origin: number, cutoffMinutes: number): Float32Array {
+export type TravelMode = 'bike' | 'walk';
+
+export function multiSourceDijkstra(
+  graph: GraphData,
+  origins: number[],
+  cutoffMinutes: number,
+  mode: TravelMode,
+): { distances: Float32Array; owners: Int32Array } {
   const distances = new Float32Array(graph.lng.length).fill(Number.POSITIVE_INFINITY);
-  distances[origin] = 0;
+  const owners = new Int32Array(graph.lng.length).fill(-1);
   const queue = new MinHeap();
-  queue.push([0, origin]);
+  origins.forEach((origin, owner) => {
+    if (distances[origin] === 0) return;
+    distances[origin] = 0;
+    owners[origin] = owner;
+    queue.push([0, origin]);
+  });
+  const weights = mode === 'bike' ? graph.bikeWeights : graph.walkWeights;
 
   while (queue.size > 0) {
     const item = queue.pop();
@@ -196,12 +273,24 @@ export function dijkstra(graph: GraphData, origin: number, cutoffMinutes: number
     if (distance > cutoffMinutes || distance > distances[node]!) continue;
     for (let edge = graph.offsets[node]!; edge < graph.offsets[node + 1]!; edge += 1) {
       const target = graph.targets[edge]!;
-      const next = distance + graph.weights[edge]!;
+      const weight = weights[edge]!;
+      if (!Number.isFinite(weight)) continue;
+      const next = distance + weight;
       if (next <= cutoffMinutes && next < distances[target]!) {
         distances[target] = next;
+        owners[target] = owners[node]!;
         queue.push([next, target]);
       }
     }
   }
-  return distances;
+  return { distances, owners };
+}
+
+export function dijkstra(
+  graph: GraphData,
+  origin: number,
+  cutoffMinutes: number,
+  mode: TravelMode = 'bike',
+): Float32Array {
+  return multiSourceDijkstra(graph, [origin], cutoffMinutes, mode).distances;
 }

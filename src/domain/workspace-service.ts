@@ -4,7 +4,6 @@ import {
   type ActivityEntry,
   type CanonicalWorkspace,
   type CommandResult,
-  type Coordinate,
   type LocationResult,
   type WorkspaceCommand,
   type WorkspaceQuery,
@@ -101,14 +100,14 @@ function userMessage(error: unknown, fallback: string): string {
 }
 
 export class WorkspaceService {
-  private presets: LocationResult[] = [];
+  private searchIndex: LocationResult[] = [];
 
   async initialize(): Promise<CommandResult> {
     const store = useWorkspaceStore.getState();
     store.setOperation('calculating');
     try {
       const initialized = await getGeoWorker().initialize();
-      this.presets = initialized.presets;
+      this.searchIndex = initialized.search;
       let restored = null;
       try {
         const shared = readSharedWorkspace();
@@ -134,6 +133,7 @@ export class WorkspaceService {
         : structuredClone(EMPTY_DERIVED);
       store.commit({
         datasetVersion: initialized.metadata.datasetVersion,
+        datasetMetadata: initialized.metadata,
         canonical,
         derived,
         activity: restored?.activity ?? [],
@@ -445,31 +445,14 @@ export class WorkspaceService {
   private async searchLocations(query: string): Promise<LocationResult[]> {
     const normalized = query.trim().toLowerCase();
     if (normalized.length < 2) return [];
-    const local = this.presets.filter(({ label }) => label.toLowerCase().includes(normalized));
-    const key = import.meta.env.VITE_MAPTILER_KEY;
-    if (!key) return local;
-    try {
-      const url = new URL(`https://api.maptiler.com/geocoding/${encodeURIComponent(query)}.json`);
-      url.searchParams.set('key', key);
-      url.searchParams.set('bbox', '-122.53,37.69,-122.34,37.83');
-      url.searchParams.set('limit', '5');
-      const response = await fetch(url);
-      if (!response.ok) return local;
-      const payload = (await response.json()) as {
-        features?: Array<{ id: string; place_name?: string; center?: Coordinate }>;
-      };
-      return (payload.features ?? [])
-        .filter((feature): feature is { id: string; place_name: string; center: Coordinate } =>
-          Boolean(feature.place_name && feature.center?.length === 2),
-        )
-        .map((feature) => ({
-          id: feature.id,
-          label: feature.place_name,
-          coordinates: feature.center,
-        }));
-    } catch {
-      return local;
-    }
+    const startsWith = this.searchIndex.filter(({ label }) =>
+      label.toLowerCase().startsWith(normalized),
+    );
+    const contains = this.searchIndex.filter(
+      ({ label }) =>
+        !label.toLowerCase().startsWith(normalized) && label.toLowerCase().includes(normalized),
+    );
+    return [...startsWith, ...contains].slice(0, 8);
   }
 }
 

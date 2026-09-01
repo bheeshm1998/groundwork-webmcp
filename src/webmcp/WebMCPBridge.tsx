@@ -126,7 +126,7 @@ export function WebMCPBridge() {
       name: 'groundwork_add_access_condition',
       title: 'Add nearby-place condition',
       description:
-        'Create a straight-line walking estimate around groceries or parks in San Francisco.',
+        'Create a pedestrian-network walking area from real OSM groceries or parks in San Francisco.',
       inputSchema: objectSchema(
         {
           category: { type: 'string', enum: ['grocery', 'park'] },

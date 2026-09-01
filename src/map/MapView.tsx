@@ -107,7 +107,8 @@ export function MapView() {
     map.addControl(
       new maplibregl.AttributionControl({
         compact: true,
-        customAttribution: 'Synthetic demo analysis · Map © OpenStreetMap contributors',
+        customAttribution:
+          'Analysis and map data © OpenStreetMap contributors (ODbL) · Neighborhoods DataSF',
       }),
       'bottom-right',
     );

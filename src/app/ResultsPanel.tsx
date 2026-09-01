@@ -49,10 +49,7 @@ export function ResultsPanel() {
               >
                 <span className="candidate-rank">{index + 1}</span>
                 <span>
-                  <strong>
-                    Area near {candidate.coordinates[1].toFixed(3)},{' '}
-                    {candidate.coordinates[0].toFixed(3)}
-                  </strong>
+                  <strong>{candidate.name}</strong>
                   <small>{candidate.tradeoff}</small>
                 </span>
               </button>
@@ -75,6 +72,12 @@ export function ResultsPanel() {
                   Comfortable margin: {candidate.comfortable.join(', ')}.
                 </p>
               ) : null}
+              {candidate.nearestGrocery ? (
+                <p className="candidate-detail">Nearest grocery: {candidate.nearestGrocery}.</p>
+              ) : null}
+              {candidate.nearestPark ? (
+                <p className="candidate-detail">Nearest park: {candidate.nearestPark}.</p>
+              ) : null}
               {candidate.closeToFailing ? (
                 <p className="candidate-warning">Tightest edge: {candidate.closeToFailing}.</p>
               ) : null}
@@ -94,9 +97,18 @@ export function ResultsPanel() {
         </div>
       ) : null}
       {derived.feasibleRegion ? (
-        <p className="assumption-note">
-          Demo result from a synthetic hackathon network; not a real-world travel guarantee.
-        </p>
+        <details className="method-panel">
+          <summary>How this is calculated</summary>
+          <p>
+            Bicycle and walking minutes use a checksum-pinned OpenStreetMap street graph on this
+            device. Reachable edges include an interpolated cutoff point; candidates are tested
+            against DataSF neighborhood polygons and named with the nearest OSM cross-street.
+          </p>
+          <p>
+            Limits: no live traffic, hills, closures, opening hours, entrance accessibility, or
+            housing availability. OSM completeness varies and modeled times are not guarantees.
+          </p>
+        </details>
       ) : null}
     </section>
   );

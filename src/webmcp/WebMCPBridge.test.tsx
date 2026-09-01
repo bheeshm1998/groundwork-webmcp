@@ -34,6 +34,7 @@ function installModelContext() {
 
 const candidate: Candidate = {
   id: 'candidate-1',
+  name: 'South of Market — near 1st Street & Howard Street',
   coordinates: [-122.4, 37.78],
   score: 0.8,
   minimumSlack: 0.4,
@@ -41,6 +42,8 @@ const candidate: Candidate = {
   bikeMinutes: 12,
   groceryMinutes: 6,
   parkMinutes: 5,
+  nearestGrocery: 'Real grocery',
+  nearestPark: 'Real park',
   comfortable: ['bike commute', 'grocery access', 'park access'],
   closeToFailing: null,
   tradeoff: 'Balanced fit.',

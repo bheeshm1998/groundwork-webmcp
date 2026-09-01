@@ -9,7 +9,7 @@ test.describe('Groundwork manual flow', () => {
     await expect(page.getByText('What location decision are you trying to make?')).toBeVisible();
     await page.getByTestId('load-sample').click();
     await expect(page.getByTestId('candidate-list')).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole('button', { name: 'Change office or sample' })).toBeEnabled({
+    await expect(page.getByRole('button', { name: 'Edit office or sample' })).toBeEnabled({
       timeout: 20_000,
     });
     await expect(page.getByText('Manual workspace history')).toBeVisible();
@@ -30,7 +30,7 @@ test.describe('Groundwork manual flow', () => {
     const sharedUrl = await page.evaluate(() => navigator.clipboard.readText());
     expect(sharedUrl).toContain('#w=');
     await page.goto(sharedUrl);
-    await expect(page.getByText('1 Market Street, San Francisco')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('San Francisco City Hall')).toBeVisible({ timeout: 20_000 });
   });
 
   test('works without WebMCP support', async ({ page }) => {
