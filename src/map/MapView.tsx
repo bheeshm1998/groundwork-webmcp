@@ -135,6 +135,9 @@ export function MapView() {
 
     map.on('load', () => {
       setMapError(null);
+      const readyDraw = drawControl.getTerraDrawInstance();
+      if (readyDraw && !readyDraw.enabled) readyDraw.start();
+      useWorkspaceStore.getState().commit({ drawingReady: Boolean(readyDraw?.enabled) });
       map.addSource('groundwork-conditions', { type: 'geojson', data: EMPTY_COLLECTION });
       map.addLayer({
         id: 'groundwork-condition-fill',
@@ -333,7 +336,7 @@ export function MapView() {
     };
     draw?.on('finish', onFinish);
     draw?.on('change', onDrawChange);
-    useWorkspaceStore.getState().commit({ drawingReady: Boolean(draw) });
+    useWorkspaceStore.getState().commit({ drawingReady: Boolean(draw?.enabled) });
 
     return () => {
       if (workspaceSnapshot().operation === 'drawing') {
@@ -349,13 +352,14 @@ export function MapView() {
       map.off('moveend', onMoveEnd);
       officeMarkerRef.current?.remove();
       map.remove();
+      drawControlRef.current = null;
       mapRef.current = null;
     };
   }, [city, mapAttempt]);
 
   useEffect(() => {
     const draw = drawControlRef.current?.getTerraDrawInstance();
-    if (!draw) return;
+    if (!draw?.enabled) return;
     const preference = canonical.conditions.find((condition) => condition.kind === 'preference');
     syncingDrawRef.current = true;
     try {
