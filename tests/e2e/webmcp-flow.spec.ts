@@ -44,8 +44,8 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
     Object.defineProperty(window, '__groundworkTools', { value: tools });
   });
 
-  await page.goto('/');
-  await expect(page.getByText('WebMCP connected')).toBeVisible();
+  await page.goto('/app');
+  await expect(page.getByTitle('Browser assistant connected')).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(() => (window as any).__groundworkTools.has('groundwork_get_workspace')),
@@ -125,6 +125,6 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
   await executeWebMcpTool(page, 'groundwork_select_candidate', { id: candidate.id });
   await expect(page.getByTestId('candidate-list')).toBeVisible();
   await expect(page.locator('.candidate-card.selected')).toHaveCount(1);
-  await expect(page.getByText('fresh', { exact: true })).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByText('Results are up to date', { exact: true })).toBeVisible();
+  await expect(page.locator('.error-toast')).toHaveCount(0);
 });

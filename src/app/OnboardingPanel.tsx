@@ -55,77 +55,57 @@ export function OnboardingPanel() {
     }
   };
 
-  if ((office || conditionCount > 0) && !editingStart) {
+  if (office && !editingStart) {
     return (
-      <section
-        className="panel onboarding-panel compact-onboarding"
-        aria-labelledby="decision-heading"
-      >
-        <div className="eyebrow">Decision setup</div>
-        <h1 id="decision-heading">{office ? 'Office selected' : 'Setup in progress'}</h1>
-        {office ? (
-          <div className="office-chip">
-            <span aria-hidden="true">◆</span>
-            {office.label}
+      <section className="setup-section destination-summary" aria-labelledby="destination-heading">
+        <div className="setup-heading-row">
+          <div>
+            <p className="step-label">1 · Destination</p>
+            <h1 id="destination-heading">Your regular destination</h1>
           </div>
-        ) : null}
-        <button type="button" onClick={() => setEditingStart(true)}>
-          Edit office or sample
-        </button>
+          <span className="step-complete">Set</span>
+        </div>
+        <div className="destination-card">
+          <span className="destination-marker" aria-hidden="true" />
+          <div>
+            <small>Commute to</small>
+            <strong>{office.label}</strong>
+          </div>
+          <button type="button" className="text-button" onClick={() => setEditingStart(true)}>
+            Change
+          </button>
+        </div>
       </section>
     );
   }
 
   return (
-    <section className="panel onboarding-panel" aria-labelledby="decision-heading">
-      <div className="eyebrow">Start with intent</div>
-      <h1 id="decision-heading">What location decision are you trying to make?</h1>
-      <p className="subtle">
-        Ask your browser agent, or build the same analysis manually. Every condition remains visible
-        and editable.
-      </p>
-      <blockquote>
-        “Find me a place under a 25-minute bike ride from San Francisco City Hall, within 10 minutes
-        of groceries and 8 minutes of a park.”
-      </blockquote>
-      <button
-        className="primary-button"
-        type="button"
-        onClick={loadSample}
-        disabled={loadingSample || operation === 'calculating' || operation === 'drawing'}
-        data-testid="load-sample"
-      >
-        {loadingSample
-          ? 'Building sample…'
-          : confirmingSample
-            ? 'Replace workspace with sample'
-            : 'Run the sample analysis'}
-      </button>
-      {confirmingSample ? (
-        <button type="button" className="sample-cancel" onClick={() => setConfirmingSample(false)}>
-          Keep current workspace
-        </button>
-      ) : null}
-      <form className="search-form" onSubmit={search}>
-        <label htmlFor="office-search">Office address</label>
-        <div className="input-row">
+    <section className="setup-section destination-setup" aria-labelledby="destination-heading">
+      <p className="step-label">Step 1 of 3</p>
+      <h1 id="destination-heading">Where do you need to go?</h1>
+      <p className="setup-description">Choose your workplace or another regular destination.</p>
+
+      <form className="destination-search" onSubmit={search}>
+        <label htmlFor="office-search">Search San Francisco</label>
+        <div className="search-control">
           <input
             id="office-search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="San Francisco City Hall"
+            placeholder="Address, street, or landmark"
             minLength={2}
+            autoFocus={!office}
           />
           <button
             type="submit"
-            className="icon-button"
-            aria-label="Search office locations"
+            className="primary-button compact-primary"
             disabled={searching || query.trim().length < 2}
           >
-            {searching ? '…' : '→'}
+            {searching ? 'Searching…' : 'Search'}
           </button>
         </div>
       </form>
+
       {matches.length > 0 ? (
         <ul className="search-results" aria-label="Location matches">
           {matches.map((match) => (
@@ -141,23 +121,45 @@ export function OnboardingPanel() {
                   setEditingStart(false);
                 }}
               >
+                <span className="search-result-marker" aria-hidden="true" />
                 {match.label}
               </button>
             </li>
           ))}
         </ul>
       ) : null}
+
       {searched && matches.length === 0 ? (
-        <p className="empty-state" role="status">
-          No supported San Francisco locations found. Try a street or landmark.
+        <p className="form-message" role="status">
+          No match found. Try a street name or a well-known landmark.
         </p>
       ) : null}
-      {office ? (
-        <div className="office-chip">
-          <span aria-hidden="true">◆</span>
-          {office.label}
-        </div>
-      ) : null}
+
+      <div className="sample-option">
+        <span>Not ready to start your own plan?</span>
+        <button
+          type="button"
+          className="text-button"
+          onClick={loadSample}
+          disabled={loadingSample || operation === 'calculating' || operation === 'drawing'}
+          data-testid="load-sample"
+        >
+          {loadingSample
+            ? 'Preparing example…'
+            : confirmingSample
+              ? 'Replace with example'
+              : 'Try an example'}
+        </button>
+        {confirmingSample ? (
+          <button
+            type="button"
+            className="text-button muted-text-button"
+            onClick={() => setConfirmingSample(false)}
+          >
+            Cancel
+          </button>
+        ) : null}
+      </div>
     </section>
   );
 }

@@ -2,7 +2,7 @@ import { workspaceService } from '../domain/workspace-service';
 import { useWorkspaceStore } from '../store/workspace-store';
 
 function minutes(value: number | null) {
-  return value === null ? '—' : `${Math.round(value)}m`;
+  return value === null ? '—' : `${Math.round(value)} min`;
 }
 
 function areaLabel(value: number) {
@@ -17,19 +17,16 @@ export function ResultsPanel() {
   const mutationsDisabled = operation === 'calculating' || operation === 'drawing';
 
   return (
-    <section className="panel results-panel" aria-labelledby="results-heading">
-      <div className="panel-heading">
-        <div>
-          <div className="eyebrow">Calculated result</div>
-          <h2 id="results-heading">Matching area</h2>
-        </div>
-        <strong className="area-stat">{areaLabel(derived.feasibleAreaKm2)}</strong>
+    <section className="results-panel" aria-labelledby="results-heading">
+      <div className="results-intro">
+        <p className="step-label">3 · Results</p>
+        <h2 id="results-heading">Your matching areas</h2>
+        <p>
+          <strong>{areaLabel(derived.feasibleAreaKm2)}</strong> of San Francisco fits your current
+          priorities.
+        </p>
       </div>
-      {derived.restriction ? (
-        <p className="restriction">{derived.restriction.message}</p>
-      ) : (
-        <p className="empty-state">Combine at least two conditions to reveal the overlap.</p>
-      )}
+
       {derived.candidates.length > 0 ? (
         <div className="candidate-list" data-testid="candidate-list">
           {derived.candidates.map((candidate, index) => (
@@ -48,18 +45,19 @@ export function ResultsPanel() {
                 }
               >
                 <span className="candidate-rank">{index + 1}</span>
-                <span>
+                <span className="candidate-title">
+                  <small>{index === 0 ? 'Best balance' : `Option ${index + 1}`}</small>
                   <strong>{candidate.name}</strong>
-                  <small>{candidate.tradeoff}</small>
                 </span>
               </button>
-              <dl>
+
+              <dl className="candidate-metrics">
                 <div>
                   <dt>Bike</dt>
                   <dd>{minutes(candidate.bikeMinutes)}</dd>
                 </div>
                 <div>
-                  <dt>Grocery</dt>
+                  <dt>Groceries</dt>
                   <dd>{minutes(candidate.groceryMinutes)}</dd>
                 </div>
                 <div>
@@ -67,46 +65,50 @@ export function ResultsPanel() {
                   <dd>{minutes(candidate.parkMinutes)}</dd>
                 </div>
               </dl>
-              {candidate.comfortable.length > 0 ? (
-                <p className="candidate-detail">
-                  Comfortable margin: {candidate.comfortable.join(', ')}.
-                </p>
-              ) : null}
-              {candidate.nearestGrocery ? (
-                <p className="candidate-detail">Nearest grocery: {candidate.nearestGrocery}.</p>
-              ) : null}
-              {candidate.nearestPark ? (
-                <p className="candidate-detail">Nearest park: {candidate.nearestPark}.</p>
-              ) : null}
-              {candidate.closeToFailing ? (
-                <p className="candidate-warning">Tightest edge: {candidate.closeToFailing}.</p>
-              ) : null}
-              <button
-                className="remove-candidate"
-                type="button"
-                aria-label={`Remove candidate ${index + 1} from consideration`}
-                disabled={mutationsDisabled}
-                onClick={() =>
-                  void workspaceService.execute({ type: 'remove-candidate', id: candidate.id })
-                }
-              >
-                Remove
-              </button>
+
+              <details className="candidate-details">
+                <summary>View details</summary>
+                <p>{candidate.tradeoff}</p>
+                {candidate.comfortable.length > 0 ? (
+                  <p>Comfortable margin: {candidate.comfortable.join(', ')}.</p>
+                ) : null}
+                {candidate.closeToFailing ? (
+                  <p className="candidate-warning">Closest limit: {candidate.closeToFailing}.</p>
+                ) : null}
+                <button
+                  className="text-button danger-text"
+                  type="button"
+                  disabled={mutationsDisabled}
+                  onClick={() =>
+                    void workspaceService.execute({ type: 'remove-candidate', id: candidate.id })
+                  }
+                >
+                  Remove this option
+                </button>
+              </details>
             </article>
           ))}
         </div>
+      ) : (
+        <div className="no-results">
+          <strong>No matching area yet</strong>
+          <p>Try increasing one of your time limits or removing a priority.</p>
+        </div>
+      )}
+
+      {derived.restriction ? (
+        <details className="result-insight">
+          <summary>What is limiting my search?</summary>
+          <p>{derived.restriction.message}</p>
+        </details>
       ) : null}
+
       {derived.feasibleRegion ? (
         <details className="method-panel">
-          <summary>How this is calculated</summary>
+          <summary>About these estimates</summary>
           <p>
-            Bicycle and walking minutes use a checksum-pinned OpenStreetMap street graph on this
-            device. Reachable edges include an interpolated cutoff point; candidates are tested
-            against DataSF neighborhood polygons and named with the nearest OSM cross-street.
-          </p>
-          <p>
-            Limits: no live traffic, hills, closures, opening hours, entrance accessibility, or
-            housing availability. OSM completeness varies and modeled times are not guarantees.
+            Times are modeled from OpenStreetMap streets. They do not include live traffic, hills,
+            closures, opening hours, or housing availability.
           </p>
         </details>
       ) : null}

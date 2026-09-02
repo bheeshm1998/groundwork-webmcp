@@ -8,4 +8,6 @@ coverage/
 playwright-report/
 test-results/
 output/playwright/
+.playwright-cli/
+.playwright-mcp/
 *.tsbuildinfo

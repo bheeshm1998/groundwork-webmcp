@@ -4,6 +4,7 @@ coverage/
 playwright-report/
 test-results/
 .playwright-cli/
+.playwright-mcp/
 package-lock.json
 PRODUCT_SCOPE.md
 GROUNDWORK_PLAN_v2.md

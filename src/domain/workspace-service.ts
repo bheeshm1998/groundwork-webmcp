@@ -34,7 +34,7 @@ function withActivity(entries: ActivityEntry[], entry: ActivityEntry): ActivityE
 function commandMessage(command: WorkspaceCommand): string {
   switch (command.type) {
     case 'set-office':
-      return `Set the office to ${command.office.label}.`;
+      return `Set the destination to ${command.office.label}.`;
     case 'add-bike':
       return `Created a ${command.maxMinutes}-minute bicycle area.`;
     case 'add-access':
@@ -42,21 +42,21 @@ function commandMessage(command: WorkspaceCommand): string {
     case 'add-preference':
       return 'Added the area you would personally consider.';
     case 'update-condition':
-      return `Changed condition ${command.id} to ${command.maxMinutes} minutes.`;
+      return `Changed a time limit to ${command.maxMinutes} minutes.`;
     case 'delete-condition':
-      return `Deleted condition ${command.id}.`;
+      return 'Removed a priority.';
     case 'set-visibility':
-      return `${command.visible ? 'Showed' : 'Hid'} condition ${command.id}.`;
+      return `${command.visible ? 'Showed' : 'Hid'} a map layer.`;
     case 'combine':
-      return 'Combined the active conditions.';
+      return 'Found the areas that match your priorities.';
     case 'recalculate':
-      return 'Recalculated the analysis from the current workspace.';
+      return 'Updated the matching areas.';
     case 'rank':
       return 'Ranked the three strongest candidate areas.';
     case 'select-candidate':
-      return command.id ? `Selected candidate ${command.id}.` : 'Cleared the candidate selection.';
+      return command.id ? 'Selected a recommended area.' : 'Cleared the selected area.';
     case 'remove-candidate':
-      return `Removed candidate ${command.id} from consideration.`;
+      return 'Removed a recommended area from consideration.';
     case 'undo':
       return 'Undid the most recent workspace change.';
     case 'reset':

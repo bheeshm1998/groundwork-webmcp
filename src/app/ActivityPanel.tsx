@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { getCapabilities } from '../domain/capabilities';
 import { workspaceService } from '../domain/workspace-service';
 import { useWorkspaceStore } from '../store/workspace-store';
 
@@ -7,12 +6,6 @@ export function ActivityPanel() {
   const [shareMessage, setShareMessage] = useState('');
   const [confirmingReset, setConfirmingReset] = useState(false);
   const state = useWorkspaceStore();
-  const capabilityCount = getCapabilities(
-    state.canonical,
-    state.derived,
-    state.analysisFreshness,
-    Boolean(state.undo),
-  ).size;
 
   const share = async () => {
     const result = await workspaceService.query({ type: 'create-share-link' });
@@ -20,43 +13,15 @@ export function ActivityPanel() {
     if (!result.ok || !url) return setShareMessage(result.message);
     try {
       await navigator.clipboard.writeText(url);
-      setShareMessage('Link copied');
+      setShareMessage('Share link copied');
     } catch {
       setShareMessage(url);
     }
   };
 
   return (
-    <section className="panel activity-panel" aria-labelledby="activity-heading">
-      <div className="panel-heading">
-        <h2 id="activity-heading">Activity</h2>
-        <span className="agent-count">
-          <i />
-          {document.modelContext
-            ? `${capabilityCount} agent actions available`
-            : 'Manual workspace history'}
-        </span>
-      </div>
-      <ol className="activity-list">
-        {state.activity
-          .toReversed()
-          .slice(0, 6)
-          .map((entry) => (
-            <li key={entry.id}>
-              <span className={`actor ${entry.actor}`}>
-                {entry.actor}
-                <time dateTime={new Date(entry.timestamp).toISOString()}>
-                  {new Date(entry.timestamp).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </time>
-              </span>
-              {entry.message}
-            </li>
-          ))}
-      </ol>
-      <div className="action-row">
+    <div className="activity-panel">
+      <div className="workspace-actions">
         <button
           type="button"
           onClick={() => void workspaceService.execute({ type: 'undo' })}
@@ -66,12 +31,46 @@ export function ActivityPanel() {
         >
           Undo last change
         </button>
-        <button type="button" onClick={share} disabled={state.operation === 'calculating'}>
-          Share workspace
-        </button>
         <button
           type="button"
-          className="ghost-danger"
+          className="primary-button"
+          onClick={share}
+          disabled={state.operation === 'calculating'}
+        >
+          Share plan
+        </button>
+      </div>
+      {shareMessage ? <output className="share-output">{shareMessage}</output> : null}
+
+      <div className="activity-heading">
+        <h3>Recent changes</h3>
+        <span>Saved in this browser</span>
+      </div>
+      {state.activity.length > 0 ? (
+        <ol className="activity-list">
+          {state.activity
+            .toReversed()
+            .slice(0, 8)
+            .map((entry) => (
+              <li key={entry.id}>
+                <span>{entry.message}</span>
+                <time dateTime={new Date(entry.timestamp).toISOString()}>
+                  {new Date(entry.timestamp).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </time>
+              </li>
+            ))}
+        </ol>
+      ) : (
+        <p className="empty-activity">Your changes will appear here.</p>
+      )}
+
+      <div className="reset-area">
+        <button
+          type="button"
+          className="text-button danger-text"
           onClick={() => {
             if (!confirmingReset) return setConfirmingReset(true);
             setConfirmingReset(false);
@@ -79,15 +78,20 @@ export function ActivityPanel() {
           }}
           disabled={state.operation === 'calculating'}
         >
-          {confirmingReset ? 'Confirm reset' : 'Reset'}
+          {confirmingReset ? 'Confirm start over' : 'Start over'}
         </button>
         {confirmingReset ? (
-          <button type="button" onClick={() => setConfirmingReset(false)}>
+          <button type="button" className="text-button" onClick={() => setConfirmingReset(false)}>
             Cancel
           </button>
         ) : null}
       </div>
-      {shareMessage ? <output className="share-output">{shareMessage}</output> : null}
-    </section>
+
+      <p className="workspace-footnote">
+        {document.modelContext
+          ? 'Browser assistant connected'
+          : 'You are using Groundwork manually. Your analysis stays on this device.'}
+      </p>
+    </div>
   );
 }
