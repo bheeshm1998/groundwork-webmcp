@@ -90,7 +90,7 @@ export function ActivityPanel() {
       <p className="workspace-footnote">
         {document.modelContext
           ? 'Browser assistant connected'
-          : 'You are using Groundwork manually. Your analysis stays on this device.'}
+          : 'Manual Mode | Browser Assistant not connected'}
       </p>
     </div>
   );

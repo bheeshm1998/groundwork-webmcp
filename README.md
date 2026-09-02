@@ -1,8 +1,8 @@
-# Groundwork
+# SweetSpot
 
-Groundwork is a fully client-side housing-location workspace for San Francisco and Hyderabad. Choose a city on the homepage, then combine bicycle commute limits, pedestrian access to groceries and parks, and a personal map boundary. Groundwork ranks separated candidate areas with explainable margins. The same workflow is available manually and through 17 capability-gated WebMCP tools.
+SweetSpot is a fully client-side housing-location workspace for San Francisco and Hyderabad. Choose a city on the homepage, then combine bicycle commute limits, pedestrian access to groceries and parks, and a personal map boundary. SweetSpot ranks separated candidate areas with explainable margins. The same workflow is available manually and through 17 capability-gated WebMCP tools.
 
-Groundwork is a planning aid, not a routing guarantee or housing listing service. It does not model live traffic, elevation, temporary closures, opening hours, accessibility, or housing availability.
+SweetSpot is a planning aid, not a routing guarantee or housing listing service. It does not model live traffic, elevation, temporary closures, opening hours, accessibility, or housing availability.
 
 ## Data
 

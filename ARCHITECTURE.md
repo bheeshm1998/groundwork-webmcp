@@ -1,6 +1,6 @@
-# Groundwork architecture
+# SweetSpot architecture
 
-Groundwork is a static, client-side spatial-analysis application. There is no application backend, database, REST API, or GraphQL server: the browser downloads the application and San Francisco dataset, then performs the analysis locally in a Web Worker.
+SweetSpot is a static, client-side spatial-analysis application. There is no application backend, database, REST API, or GraphQL server: the browser downloads the application and San Francisco dataset, then performs the analysis locally in a Web Worker.
 
 ## System architecture
 
@@ -253,7 +253,7 @@ Interaction is bidirectional:
 - Drawing or editing a polygon sends `add-preference`.
 - Deleting a drawn polygon sends `delete-condition`.
 
-MapLibre also uses its own rendering worker, separate from the Groundwork geographic worker.
+MapLibre also uses its own rendering worker, separate from the SweetSpot geographic worker.
 
 Only the visual base map depends on MapTiler or OpenFreeMap. Routing, search, ranking and candidate naming use the bundled data and remain local if tiles fail.
 
@@ -277,7 +277,7 @@ The current bridge registers **18 WebMCP tools**, although the README currently 
 
 | Request | Origin | Purpose |
 | --- | --- | --- |
-| HTML, JavaScript, CSS and workers | Groundwork static origin | Load the application |
+| HTML, JavaScript, CSS and workers | SweetSpot static origin | Load the application |
 | `/data/sf/metadata.json` | Same origin | Discover the exact dataset version and filenames |
 | Five versioned analysis assets | Same origin | Graph, places, boundary, neighborhoods and labels |
 | Map style and tiles | MapTiler or OpenFreeMap | Visual background map only |

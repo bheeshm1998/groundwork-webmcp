@@ -246,7 +246,7 @@ async function loadPbfSource(pbfPath: string) {
     throw new Error(
       'Set OSM_PBF_SOURCE_URL to the exact timestamped Geofabrik URL used for OSM_PBF_PATH.',
     );
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'groundwork-osmium-'));
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'sweetspot-osmium-'));
   try {
     const extractPath = join(temporaryDirectory, `${city.slug}.osm.pbf`);
     const filteredPath = join(temporaryDirectory, `${city.slug}-filtered.osm.pbf`);
@@ -329,7 +329,7 @@ async function loadOsmSource() {
           accept: 'application/json',
           'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
           'user-agent':
-            'Groundwork dataset builder (https://github.com/bheeshm1998/groundwork-webmcp)',
+            'SweetSpot dataset builder (https://github.com/bheeshm1998/groundwork-webmcp)',
         },
         body: new URLSearchParams({ data: overpassQuery }),
       });

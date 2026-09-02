@@ -148,9 +148,9 @@ export class WorkspaceService {
         analysisFreshness: canonical.combined ? 'fresh' : 'not-combined',
         initialized: true,
       });
-      return { ok: true, message: `Groundwork is ready for ${CITIES[cityId].name}.` };
+      return { ok: true, message: `SweetSpot is ready for ${CITIES[cityId].name}.` };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Groundwork could not initialize.';
+      const message = error instanceof Error ? error.message : 'SweetSpot could not initialize.';
       store.setOperation('error', message);
       return { ok: false, message };
     }

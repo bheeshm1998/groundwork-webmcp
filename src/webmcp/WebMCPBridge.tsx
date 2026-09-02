@@ -70,9 +70,9 @@ export function WebMCPBridge() {
 
     register('get-workspace', {
       name: 'groundwork_get_workspace',
-      title: 'Read Groundwork workspace',
+      title: 'Read SweetSpot workspace',
       description:
-        'Read a compact summary of the visible Groundwork map workspace and current results.',
+        'Read a compact summary of the visible SweetSpot map workspace and current results.',
       annotations: { readOnlyHint: true },
       execute: () => workspaceService.query({ type: 'get-workspace' }),
     });

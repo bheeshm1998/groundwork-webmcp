@@ -44,9 +44,9 @@ function WorkspaceApp() {
     <main className="app-shell workspace-page">
       <WebMCPBridge />
       <header className="topbar">
-        <a className="brand" href="/" aria-label="Groundwork home">
-          <span className="brand-mark">G</span>
-          <span>Groundwork</span>
+        <a className="brand" href="/" aria-label="SweetSpot home">
+          <span className="brand-mark">S</span>
+          <span>SweetSpot</span>
         </a>
         <nav className="workflow-steps" aria-label="Planning progress">
           {['Destination', 'Priorities', 'Results'].map((label, index) => {
@@ -143,7 +143,7 @@ function WorkspaceApp() {
       ) : null}
       {!initialized && operation !== 'error' ? (
         <div className="boot-screen">
-          <span className="brand-mark">G</span>
+          <span className="brand-mark">S</span>
           <p>Preparing your map…</p>
         </div>
       ) : null}

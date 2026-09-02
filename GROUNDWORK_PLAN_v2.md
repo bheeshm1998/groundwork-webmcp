@@ -1,8 +1,8 @@
-# Groundwork Implementation Plan (v2)
+# SweetSpot Implementation Plan (v2)
 
 ## Summary
 
-Groundwork is a San Francisco–only, browser-side spatial workspace for finding
+SweetSpot is a San Francisco–only, browser-side spatial workspace for finding
 a home candidate area based on bike-commute time, grocery access, and park
 access. It has two front ends onto the same state: a manual UI, and a set of
 WebMCP tools a browser AI agent can call directly. Nothing runs on a server —
@@ -436,7 +436,7 @@ measured values from agent-authored prose.
 - v1 supports San Francisco only and rejects analysis origins outside its
   dataset boundary — this is fine as-is; regional scope is a reasonable
   hackathon constraint and orthogonal to the tool-design question.
-- WebMCP/browser-agent conversation is external to Groundwork; the page does
+- WebMCP/browser-agent conversation is external to SweetSpot; the page does
   not present a misleading in-app chat box.
 - Full manual controls provide the same functionality in unsupported
   browsers.

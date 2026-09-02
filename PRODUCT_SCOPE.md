@@ -1,4 +1,4 @@
-# Groundwork — Product Features and User Experience (Hackathon Scope)
+# SweetSpot — Product Features and User Experience (Hackathon Scope)
 
 **What changed in this version:**
 - The noise layer is removed. There is no easy, reliable source of street-level noise data, so it is left out instead of faked.
@@ -7,17 +7,17 @@
 
 ---
 
-## 1. What is Groundwork?
+## 1. What is SweetSpot?
 
-Groundwork is a map-based workspace that helps a person solve location problems with an AI agent.
+SweetSpot is a map-based workspace that helps a person solve location problems with an AI agent.
 
-The user explains what they need in normal language. Groundwork turns those needs into visible areas on a map, combines them, and shows the locations that satisfy the most important conditions.
+The user explains what they need in normal language. SweetSpot turns those needs into visible areas on a map, combines them, and shows the locations that satisfy the most important conditions.
 
 The key idea is simple:
 
-> The AI decides which map operations are needed, Groundwork performs the exact geographic calculations, and the user can see and correct the result directly on the map.
+> The AI decides which map operations are needed, SweetSpot performs the exact geographic calculations, and the user can see and correct the result directly on the map.
 
-Groundwork is not another chatbot that returns a list of places. It gives the user a live map containing the reasoning behind the answer.
+SweetSpot is not another chatbot that returns a list of places. It gives the user a live map containing the reasoning behind the answer.
 
 ---
 
@@ -38,7 +38,7 @@ Normal map applications are good at answering one question at a time. They can s
 
 Today, the user normally has to perform many searches, remember the results, switch between tabs, and make a rough judgment by looking at the map. A professional GIS tool could perform the calculations, but an ordinary user would not know how to use it.
 
-Groundwork gives normal users the power of a basic geographic analysis tool without requiring them to understand GIS software.
+SweetSpot gives normal users the power of a basic geographic analysis tool without requiring them to understand GIS software.
 
 ---
 
@@ -69,7 +69,7 @@ Example:
 
 > "Find me a place to live in San Francisco. It should be under a 25-minute bike ride from 1 Market Street, within a 10-minute walk of a grocery store, and within an 8-minute walk of a park."
 
-The AI reads the request and asks Groundwork to create the required map layers.
+The AI reads the request and asks SweetSpot to create the required map layers.
 
 ### 4.2 Turn every condition into a visible map layer
 
@@ -87,7 +87,7 @@ Walking access to stores and parks is based on straight-line distance from each 
 
 ### 4.3 Combine several conditions
 
-Groundwork calculates where the allowed areas overlap and removes excluded areas.
+SweetSpot calculates where the allowed areas overlap and removes excluded areas.
 
 The remaining highlighted shape is the feasible region: the parts of the city that satisfy all current conditions.
 
@@ -95,7 +95,7 @@ This is the core calculation that would otherwise require a person to compare se
 
 ### 4.4 Recommend candidate areas
 
-Groundwork places pins on the three strongest candidate blocks or small areas inside the feasible region.
+SweetSpot places pins on the three strongest candidate blocks or small areas inside the feasible region.
 
 For every candidate, the user sees:
 
@@ -110,7 +110,7 @@ The first version recommends areas, not available houses. It should not pretend 
 
 ### 4.5 Explain what is restricting the search
 
-Sometimes the result will be too small or completely empty. Groundwork identifies which condition is removing the largest amount of otherwise suitable land.
+Sometimes the result will be too small or completely empty. SweetSpot identifies which condition is removing the largest amount of otherwise suitable land.
 
 For example:
 
@@ -128,7 +128,7 @@ The AI can ask:
 
 > "Please draw the part of the city you would actually consider."
 
-Groundwork activates the drawing mode. The user draws a shape directly on the map. As soon as the drawing is finished, it becomes another condition in the analysis.
+SweetSpot activates the drawing mode. The user draws a shape directly on the map. As soon as the drawing is finished, it becomes another condition in the analysis.
 
 This is an important interaction because:
 
@@ -189,7 +189,7 @@ Nothing needs to be saved on a server. The link itself holds all the details, so
 
 ## 5. Complete user flow
 
-### Step 1: Open Groundwork
+### Step 1: Open SweetSpot
 
 The user opens the website. They see:
 
@@ -214,7 +214,7 @@ Examples:
 - "Which office address did you mean?"
 - "By grocery store, do you mean a full supermarket or will a convenience store work?"
 
-Groundwork should not silently invent important preferences.
+SweetSpot should not silently invent important preferences.
 
 ### Step 4: Watch the conditions appear
 
@@ -224,7 +224,7 @@ The user sees the result being built instead of waiting for an unexplained final
 
 ### Step 5: See the matching area
 
-Groundwork combines the layers. A smaller highlighted area remains.
+SweetSpot combines the layers. A smaller highlighted area remains.
 
 A short result might say:
 
@@ -242,13 +242,13 @@ The user can click any pin to highlight its details.
 
 The AI asks the user to draw the area they would genuinely consider.
 
-The user draws a rough boundary. Groundwork adds it to the analysis and updates the result.
+The user draws a rough boundary. SweetSpot adds it to the analysis and updates the result.
 
 ### Step 8: Correct or change the analysis
 
 The user can drag the office pin, edit the drawing, change a time limit, or remove a condition.
 
-For example, they may drag the office marker to a different branch office. Groundwork detects that the shared map state has changed, and the AI can rerun the relevant calculations.
+For example, they may drag the office marker to a different branch office. SweetSpot detects that the shared map state has changed, and the AI can rerun the relevant calculations.
 
 ### Step 9: Understand the trade-offs
 
@@ -278,7 +278,7 @@ The result is not only a paragraph or a list of neighbourhood names. The user re
 - The ability to edit and recalculate it.
 - A link that preserves the workspace.
 
-The final decision still belongs to the human. Groundwork reduces the search space and makes the reasoning inspectable.
+The final decision still belongs to the human. SweetSpot reduces the search space and makes the reasoning inspectable.
 
 ---
 
@@ -351,7 +351,7 @@ A team could build a separate backend, frontend, and MCP server to do this. But 
 
 ## 8. What WebMCP changes
 
-WebMCP allows Groundwork itself to tell the AI what actions it supports on the currently open page.
+WebMCP allows SweetSpot itself to tell the AI what actions it supports on the currently open page.
 
 The AI does not need to guess which button to click. It can ask the page to perform meaningful actions such as:
 
@@ -380,7 +380,7 @@ The biggest benefit is not that WebMCP can calculate maps while other methods ca
 
 ## 9. Before and after WebMCP
 
-| Task | Before WebMCP | With Groundwork and WebMCP |
+| Task | Before WebMCP | With SweetSpot and WebMCP |
 |---|---|---|
 | Express the need | Run several searches and set filters separately | Describe the complete problem in normal language |
 | Calculate travel reach | Test routes from many locations or use specialist software | The agent asks the page to create an exact travel area |
@@ -395,14 +395,14 @@ The biggest benefit is not that WebMCP can calculate maps while other methods ca
 
 ## 10. Why WebMCP is central to this product
 
-Groundwork would be a weak WebMCP project if it only allowed an AI to zoom the map, pan left, or click the search box. Those are button-level actions, and a computer-control agent can already perform them.
+SweetSpot would be a weak WebMCP project if it only allowed an AI to zoom the map, pan left, or click the search box. Those are button-level actions, and a computer-control agent can already perform them.
 
-Groundwork instead gives the AI higher-level geographic abilities. One action can create a travel area, combine several shapes, or rank candidates using the current map state.
+SweetSpot instead gives the AI higher-level geographic abilities. One action can create a travel area, combine several shapes, or rank candidates using the current map state.
 
 The strongest WebMCP moment is when the AI pauses and requests geographic input from the human. The user draws a shape, and that shape becomes the result of the AI's request. This shows real cooperation:
 
 - The AI contributes planning and reasoning.
-- Groundwork contributes precise spatial calculation.
+- SweetSpot contributes precise spatial calculation.
 - The human contributes taste, judgment, and correction.
 
 None of the three is treated as a passive observer.
@@ -413,7 +413,7 @@ None of the three is treated as a passive observer.
 
 The user should never lose control of the workspace.
 
-Groundwork should therefore:
+SweetSpot should therefore:
 
 - Show every AI action in plain language.
 - Let the user undo the most recent map change.
@@ -448,4 +448,4 @@ This demo proves the full product idea: natural-language intent, exact map compu
 
 ## 13. One-sentence product definition
 
-> Groundwork is a shared spatial reasoning workspace where an AI composes map operations, the webpage performs them precisely, and the human steers the answer by editing the same live map.
+> SweetSpot is a shared spatial reasoning workspace where an AI composes map operations, the webpage performs them precisely, and the human steers the answer by editing the same live map.

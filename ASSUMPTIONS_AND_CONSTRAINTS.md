@@ -1,10 +1,10 @@
-# Groundwork assumptions and constraints
+# SweetSpot assumptions and constraints
 
 Last reviewed: 2026-09-02
 
 ## Product scope
 
-- Groundwork is a client-side spatial decision aid, not a live routing, real-estate listing, safety, or accessibility service.
+- SweetSpot is a client-side spatial decision aid, not a live routing, real-estate listing, safety, or accessibility service.
 - Users choose either San Francisco or Hyderabad before opening the planner. Each workspace belongs to one city and cannot combine conditions across cities.
 - The supported search bounds are `[-122.53, 37.69]` to `[-122.34, 37.83]` for San Francisco and `[78.29, 17.20]` to `[78.67, 17.56]` for Hyderabad. Office coordinates outside the selected city are rejected; calculated regions are clipped to the corresponding city boundary polygon.
 - A workspace may contain one bicycle condition, one grocery condition, one park condition, and one preference drawing. Setting the same type again replaces the prior condition so scoring and explanations remain unambiguous.
@@ -35,7 +35,7 @@ Last reviewed: 2026-09-02
 - Preference geometry is limited to valid closed Polygon/MultiPolygon rings and 500 vertices total. Share fragments are limited to 8,192 compressed URL characters and 256,000 decompressed bytes.
 - Activity keeps the most recent 40 entries. Undo stores one meaningful canonical change. Recalculation, ranking, candidate selection, map movement, and layer visibility do not consume that undo slot.
 - Reset requires confirmation, keeps a one-session undo snapshot, clears the share hash, and clears persisted state. Running the sample over existing work also requires explicit replacement confirmation.
-- If browser persistence fails, the in-memory change remains active and Groundwork reports that it could not autosave. A reload can then lose that session-only change.
+- If browser persistence fails, the in-memory change remains active and SweetSpot reports that it could not autosave. A reload can then lose that session-only change.
 
 ## Browser, map, and WebMCP constraints
 

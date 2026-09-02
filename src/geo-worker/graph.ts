@@ -133,12 +133,12 @@ export function loadGraph(spec: SerializedGraph): GraphData {
 export function decodeGraphBinary(bytes: Uint8Array): GraphData {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const magic = new TextDecoder().decode(bytes.subarray(0, 4));
-  if (magic !== 'GWG2') throw new Error('Unsupported Groundwork graph binary.');
+  if (magic !== 'GWG2') throw new Error('Unsupported SweetSpot graph binary.');
   const nodeCount = view.getUint32(4, true);
   const edgeCount = view.getUint32(8, true);
   const expectedBytes = 12 + nodeCount * 8 + (nodeCount + 1) * 4 + edgeCount * 8;
   if (bytes.byteLength !== expectedBytes)
-    throw new Error('The Groundwork graph binary is truncated.');
+    throw new Error('The SweetSpot graph binary is truncated.');
   const lng = new Float64Array(nodeCount);
   const lat = new Float64Array(nodeCount);
   let cursor = 12;

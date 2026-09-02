@@ -1,6 +1,6 @@
 # Dataset notice
 
-Groundwork displays the required `© OpenStreetMap contributors` attribution.
+SweetSpot displays the required `© OpenStreetMap contributors` attribution.
 The checked-in, versioned assets are derived from the real source extracts
 listed with retrieval dates and SHA-256 checksums in `metadata.json`.
 

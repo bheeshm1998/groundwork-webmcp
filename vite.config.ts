@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       {
-        name: 'groundwork-origin-trial-token',
+        name: 'sweetspot-origin-trial-token',
         transformIndexHtml(html) {
           if (!env.VITE_WEBMCP_ORIGIN_TRIAL_TOKEN) {
             return html.replace(

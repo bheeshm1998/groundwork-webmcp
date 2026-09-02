@@ -1,13 +1,13 @@
 import { expect, test } from '@playwright/test';
 
-test.describe('Groundwork manual flow', () => {
+test.describe('SweetSpot manual flow', () => {
   test('builds, edits, undoes, and shares the sample workspace', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
       origin: 'http://127.0.0.1:4173',
     });
     await page.goto('/');
     await expect(
-      page.getByRole('heading', { name: 'Find a place that fits your everyday life.' }),
+      page.getByRole('heading', { name: 'Find places that fits your preferences' }),
     ).toBeVisible();
     await page.getByRole('link', { name: 'Plan in San Francisco' }).click();
     await expect(page).toHaveURL(/\/app\?city=sf$/u);
@@ -60,7 +60,7 @@ test.describe('Groundwork manual flow', () => {
   test('works without WebMCP support', async ({ page }) => {
     await page.goto('/app?city=sf');
     await page.getByRole('button', { name: 'Workspace' }).click();
-    await expect(page.getByText(/using Groundwork manually/u)).toBeVisible();
+    await expect(page.getByText(/using SweetSpot manually/u)).toBeVisible();
     await page.getByRole('button', { name: 'Close workspace options' }).click();
     await page.getByTestId('load-sample').click();
     await expect(page.getByTestId('candidate-list')).toBeVisible({ timeout: 20_000 });

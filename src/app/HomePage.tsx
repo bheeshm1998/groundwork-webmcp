@@ -23,9 +23,9 @@ export function HomePage() {
   return (
     <main className="landing-page">
       <header className="landing-header">
-        <a className="brand brand-dark" href="/" aria-label="Groundwork home">
-          <span className="brand-mark">G</span>
-          <span>Groundwork</span>
+        <a className="brand brand-dark" href="/" aria-label="SweetSpot home">
+          <span className="brand-mark">S</span>
+          <span>SweetSpot</span>
         </a>
       </header>
 
@@ -57,7 +57,7 @@ export function HomePage() {
           </div>
         </div>
 
-        <div className="hero-preview" aria-label="Example Groundwork result">
+        <div className="hero-preview" aria-label="Example SweetSpot result">
           <div className="preview-toolbar">
             <span className="preview-window-label">Your search</span>
             <span className="preview-status">3 matches</span>
@@ -116,9 +116,9 @@ export function HomePage() {
       </section>
 
       <footer className="landing-footer">
-        <a className="brand brand-dark" href="/" aria-label="Groundwork home">
-          <span className="brand-mark">G</span>
-          <span>Groundwork</span>
+        <a className="brand brand-dark" href="/" aria-label="SweetSpot home">
+          <span className="brand-mark">S</span>
+          <span>SweetSpot</span>
         </a>
         <p>A planning aid for San Francisco and Hyderabad—not a housing listing service.</p>
       </footer>
