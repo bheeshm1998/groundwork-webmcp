@@ -3,8 +3,12 @@ import { CanonicalWorkspaceSchema, OfficeSchema, PolygonFeatureSchema } from './
 import { EMPTY_CANONICAL } from './defaults';
 
 describe('workspace schemas', () => {
-  it('rejects offices outside the supported San Francisco bounds', () => {
-    expect(() => OfficeSchema.parse({ label: 'Elsewhere', coordinates: [0, 0] })).toThrow();
+  it('accepts global office coordinates and rejects invalid longitude/latitude values', () => {
+    expect(OfficeSchema.parse({ label: 'Hyderabad', coordinates: [78.4867, 17.385] })).toEqual({
+      label: 'Hyderabad',
+      coordinates: [78.4867, 17.385],
+    });
+    expect(() => OfficeSchema.parse({ label: 'Invalid', coordinates: [181, 91] })).toThrow();
   });
 
   it('rejects combined workspaces with too few or duplicate condition types', () => {

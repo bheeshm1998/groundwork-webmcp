@@ -218,7 +218,7 @@ Groundwork should not silently invent important preferences.
 
 ### Step 4: Watch the conditions appear
 
-The map moves to San Francisco and adds each condition as a visible layer.
+The map moves to the city selected on the homepage and adds each condition as a visible layer.
 
 The user sees the result being built instead of waiting for an unexplained final answer.
 
@@ -431,7 +431,7 @@ The purpose is to help the user make a better decision, not to create an answer 
 
 The demo should show one complete story in about 90 seconds:
 
-1. Open a clean San Francisco map.
+1. Choose San Francisco or Hyderabad and open a clean city map.
 2. Ask the housing question in normal language.
 3. Watch the bicycle, grocery, and park layers appear.
 4. Show the final matching region and three ranked candidates.

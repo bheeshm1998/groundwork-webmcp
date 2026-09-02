@@ -8,12 +8,14 @@ import { workspaceService } from '../domain/workspace-service';
 import { useWorkspaceStore } from '../store/workspace-store';
 import { WebMCPBridge } from '../webmcp/WebMCPBridge';
 import { cancelPreferenceDraw } from '../map/drawing';
+import { cityFromLocation } from '../domain/cities';
 
 const MapView = lazy(() =>
   import('../map/MapView').then((module) => ({ default: module.MapView })),
 );
 
 function WorkspaceApp() {
+  const requestedCityId = cityFromLocation();
   const initialized = useWorkspaceStore((state) => state.initialized);
   const operation = useWorkspaceStore((state) => state.operation);
   const error = useWorkspaceStore((state) => state.error);
@@ -26,8 +28,8 @@ function WorkspaceApp() {
   const currentStep = hasResults ? 3 : office && conditionCount >= 2 ? 2 : office ? 2 : 1;
 
   useEffect(() => {
-    void workspaceService.initialize();
-  }, []);
+    void workspaceService.initialize(requestedCityId);
+  }, [requestedCityId]);
 
   useEffect(() => {
     if (!showActivity) return;
@@ -81,9 +83,13 @@ function WorkspaceApp() {
           {office ? <ConditionsPanel /> : null}
         </aside>
         <section className="map-region">
-          <Suspense fallback={<div className="map-loading">Loading map…</div>}>
-            <MapView />
-          </Suspense>
+          {initialized ? (
+            <Suspense fallback={<div className="map-loading">Loading map…</div>}>
+              <MapView />
+            </Suspense>
+          ) : (
+            <div className="map-loading">Loading map…</div>
+          )}
           {operation === 'calculating' ? (
             <div className="calculation-pill" role="status">
               Calculating on this device…

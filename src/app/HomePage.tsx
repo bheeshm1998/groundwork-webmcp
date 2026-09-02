@@ -17,6 +17,9 @@ const outcomes = [
 ];
 
 export function HomePage() {
+  const [cityId, setCityId] = useState<CityId>(DEFAULT_CITY_ID);
+  const city = CITIES[cityId];
+
   return (
     <main className="landing-page">
       <header className="landing-header">
@@ -24,23 +27,34 @@ export function HomePage() {
           <span className="brand-mark">G</span>
           <span>Groundwork</span>
         </a>
-        <a className="header-link" href="/app">
-          Open planner
-        </a>
       </header>
 
       <section className="hero-section">
         <div className="hero-copy">
-          <p className="hero-kicker">Neighborhood planning for San Francisco</p>
-          <h1>Find a place that fits your everyday life.</h1>
-          <p className="hero-description">
-            Combine your commute, grocery, and park preferences to discover the parts of the city
-            that work for you.
-          </p>
-          <a className="primary-link" href="/app">
-            Start planning
-          </a>
-          <p className="hero-note">Free to use. No account needed.</p>
+          <p className="hero-kicker">Neighborhood planning for San Francisco and Hyderabad</p>
+          <h1>Find places that fits your preferences</h1>
+          <div className="city-picker" id="choose-city" aria-labelledby="city-picker-label">
+            <br></br>
+            <br></br>
+            <span id="city-picker-label">Choose your city</span>
+            <div className="city-options">
+              {(Object.values(CITIES) as Array<(typeof CITIES)[CityId]>).map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={cityId === option.id ? 'city-option selected' : 'city-option'}
+                  aria-pressed={cityId === option.id}
+                  onClick={() => setCityId(option.id)}
+                >
+                  <strong>{option.name}</strong>
+                  <span>{option.country}</span>
+                </button>
+              ))}
+            </div>
+            <a className="primary-link" href={`/app?city=${cityId}`}>
+              Plan in {city.name}
+            </a>
+          </div>
         </div>
 
         <div className="hero-preview" aria-label="Example Groundwork result">
@@ -53,7 +67,7 @@ export function HomePage() {
               <span className="preview-pin" />
               <div>
                 <small>Destination</small>
-                <strong>San Francisco City Hall</strong>
+                <strong>{city.sampleOffice.label}</strong>
               </div>
               <div className="preview-rule" />
               <div className="preview-priority-row">
@@ -77,7 +91,7 @@ export function HomePage() {
               <span className="result-glow result-glow-two" />
               <div className="preview-match-card">
                 <small>Best match</small>
-                <strong>Civic Center</strong>
+                <strong>{cityId === 'sf' ? 'Civic Center' : 'Ramanthapur'}</strong>
                 <span>All three priorities are within reach</span>
               </div>
             </div>
@@ -101,23 +115,15 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="closing-cta">
-        <div>
-          <p className="section-kicker">Make the trade-offs visible</p>
-          <h2>Start with the place you need to reach.</h2>
-        </div>
-        <a className="primary-link" href="/app">
-          Open Groundwork
-        </a>
-      </section>
-
       <footer className="landing-footer">
         <a className="brand brand-dark" href="/" aria-label="Groundwork home">
           <span className="brand-mark">G</span>
           <span>Groundwork</span>
         </a>
-        <p>A planning aid for San Francisco—not a housing listing service.</p>
+        <p>A planning aid for San Francisco and Hyderabad—not a housing listing service.</p>
       </footer>
     </main>
   );
 }
+import { useState } from 'react';
+import { CITIES, DEFAULT_CITY_ID, type CityId } from '../domain/cities';

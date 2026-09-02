@@ -1,5 +1,6 @@
 import { workspaceService } from '../domain/workspace-service';
 import { useWorkspaceStore } from '../store/workspace-store';
+import { CITIES } from '../domain/cities';
 
 function minutes(value: number | null) {
   return value === null ? '—' : `${Math.round(value)} min`;
@@ -15,6 +16,7 @@ export function ResultsPanel() {
   const selectedId = useWorkspaceStore((state) => state.canonical.selectedCandidateId);
   const operation = useWorkspaceStore((state) => state.operation);
   const mutationsDisabled = operation === 'calculating' || operation === 'drawing';
+  const cityId = useWorkspaceStore((state) => state.cityId);
 
   return (
     <section className="results-panel" aria-labelledby="results-heading">
@@ -22,8 +24,8 @@ export function ResultsPanel() {
         <p className="step-label">3 · Results</p>
         <h2 id="results-heading">Your matching areas</h2>
         <p>
-          <strong>{areaLabel(derived.feasibleAreaKm2)}</strong> of San Francisco fits your current
-          priorities.
+          <strong>{areaLabel(derived.feasibleAreaKm2)}</strong> of {CITIES[cityId].name} fits your
+          current priorities.
         </p>
       </div>
 

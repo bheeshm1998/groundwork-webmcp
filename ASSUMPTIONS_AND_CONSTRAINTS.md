@@ -1,22 +1,23 @@
 # Groundwork assumptions and constraints
 
-Last reviewed: 2026-09-01
+Last reviewed: 2026-09-02
 
 ## Product scope
 
 - Groundwork is a client-side spatial decision aid, not a live routing, real-estate listing, safety, or accessibility service.
-- The supported analysis area is the San Francisco bounding box `[-122.53, 37.69]` to `[-122.34, 37.83]`. Office coordinates outside it are rejected.
+- Users choose either San Francisco or Hyderabad before opening the planner. Each workspace belongs to one city and cannot combine conditions across cities.
+- The supported search bounds are `[-122.53, 37.69]` to `[-122.34, 37.83]` for San Francisco and `[78.29, 17.20]` to `[78.67, 17.56]` for Hyderabad. Office coordinates outside the selected city are rejected; calculated regions are clipped to the corresponding city boundary polygon.
 - A workspace may contain one bicycle condition, one grocery condition, one park condition, and one preference drawing. Setting the same type again replaces the prior condition so scoring and explanations remain unambiguous.
 - At least two conditions are required to create a combined feasible region.
 
 ## Shipped data
 
-- The committed `public/data/sf` assets contain a checksum-pinned OpenStreetMap extract plus official DataSF city/county and Analysis Neighborhood polygons. There is no synthetic fallback.
+- The committed `public/data/sf` assets contain a checksum-pinned OpenStreetMap extract plus official DataSF city/county and Analysis Neighborhood polygons. `public/data/hyderabad` contains a separate checksum-pinned OSM extract, the Hyderabad administrative boundary, and GHMC ward polygons. There is no synthetic fallback.
 - Every asset filename is versioned. `metadata.json` records source URLs, extract dates, SHA-256 checksums, counts, graph format, and the dataset version.
-- The street network contracts degree-2 vertices and is shipped as a custom gzip-compressed binary. The build fails at 2 MB or larger.
+- The street network contracts degree-2 vertices and is shipped as a custom gzip-compressed binary. The build budget is 2 MB for San Francisco and 8 MB for the larger Hyderabad graph.
 - Groceries include named OSM `shop=supermarket`, `shop=grocery`, and `shop=convenience` records. Parks use named `leisure=park` records. Nodes, ways, and relations are included; polygon records use a point on their surface.
 - If `osmium-tool` is unavailable, the build uses a saved and checksummed Overpass response. Fetch, validation, unexpectedly small extract, and graph-budget failures stop the build; generated coordinates or place records are never substituted.
-- Share links are rejected when their dataset version differs from the loaded dataset; there is no cross-version migration.
+- Share links store the city and are rejected when their dataset version differs from that city's loaded dataset; there is no cross-version migration.
 
 ## Calculation assumptions
 
@@ -24,7 +25,7 @@ Last reviewed: 2026-09-01
 - Bicycle minutes use directional OSM-eligible edges and modeled road-class speeds. Reachable polygons sample full and partially reachable edges, interpolating the exact time cutoff before polygonization. They do not model traffic, elevation, rider ability, surface quality, construction, or live closures.
 - Grocery type is enforced consistently in both feasible-area construction and candidate scoring. “Supermarket” excludes records typed only as grocery.
 - Every hard condition must produce a valid layer. If any layer is missing or cannot intersect the supported boundary, the combined feasible region is empty rather than silently dropping that condition.
-- Candidate points are generated from H3 cells whose centers are inside the feasible polygon, kept at least 300 m apart, and named with the containing DataSF Analysis Neighborhood plus nearest named OSM cross-street. Regions smaller than a cell use a Turf point-on-feature fallback; the final coordinate is checked against the feasible geometry.
+- Candidate points are generated from H3 cells whose centers are inside the feasible polygon, kept at least 300 m apart, and named with the containing DataSF Analysis Neighborhood or GHMC ward plus the nearest named OSM cross-street. Regions smaller than a cell use a Turf point-on-feature fallback; the final coordinate is checked against the feasible geometry.
 - Candidate ranking maximizes the weakest normalized margin first and average margin second. It is deterministic but is not a statistical recommendation or market ranking.
 - Condition layers are cached in the worker for the 50 most recent exact inputs. Calculations are synchronous inside the worker and cannot currently be cancelled mid-operation; the UI prevents conflicting mutations while one runs.
 
@@ -46,5 +47,5 @@ Last reviewed: 2026-09-01
 
 ## Release constraints
 
-- Before describing a release as current, rebuild and review the source checksums, POI coverage, graph directionality, and DataSF boundary versions.
+- Before describing a release as current, rebuild and review each city's source checksums, POI coverage, graph directionality, and boundary versions.
 - A release still requires a deployed-origin WebMCP smoke test and comparison against an independent routing source. Real source data removes fabrication; it does not turn modeled travel time into a guarantee.

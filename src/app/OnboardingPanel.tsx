@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import type { LocationResult } from '../domain/schemas';
-import { SAMPLE_OFFICE } from '../domain/defaults';
+import { CITIES } from '../domain/cities';
 import { workspaceService } from '../domain/workspace-service';
 import { useWorkspaceStore } from '../store/workspace-store';
 
@@ -15,6 +15,8 @@ export function OnboardingPanel() {
   const office = useWorkspaceStore((state) => state.canonical.office);
   const conditionCount = useWorkspaceStore((state) => state.canonical.conditions.length);
   const operation = useWorkspaceStore((state) => state.operation);
+  const cityId = useWorkspaceStore((state) => state.cityId);
+  const city = CITIES[cityId];
 
   const search = async (event: FormEvent) => {
     event.preventDefault();
@@ -39,15 +41,22 @@ export function OnboardingPanel() {
     setLoadingSample(true);
     try {
       await workspaceService.execute({ type: 'reset' });
-      await workspaceService.execute({ type: 'set-office', office: SAMPLE_OFFICE });
-      await workspaceService.execute({ type: 'add-bike', maxMinutes: 25 });
+      await workspaceService.execute({ type: 'set-office', office: city.sampleOffice });
+      await workspaceService.execute({
+        type: 'add-bike',
+        maxMinutes: city.samplePriorities.bikeMinutes,
+      });
       await workspaceService.execute({
         type: 'add-access',
         category: 'grocery',
-        maxMinutes: 10,
+        maxMinutes: city.samplePriorities.groceryMinutes,
         groceryType: 'supermarket',
       });
-      await workspaceService.execute({ type: 'add-access', category: 'park', maxMinutes: 8 });
+      await workspaceService.execute({
+        type: 'add-access',
+        category: 'park',
+        maxMinutes: city.samplePriorities.parkMinutes,
+      });
       await workspaceService.execute({ type: 'combine' });
       setEditingStart(false);
     } finally {
@@ -86,7 +95,7 @@ export function OnboardingPanel() {
       <p className="setup-description">Choose your workplace or another regular destination.</p>
 
       <form className="destination-search" onSubmit={search}>
-        <label htmlFor="office-search">Search San Francisco</label>
+        <label htmlFor="office-search">Search {city.name}</label>
         <div className="search-control">
           <input
             id="office-search"

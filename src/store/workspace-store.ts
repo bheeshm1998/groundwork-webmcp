@@ -8,8 +8,10 @@ import type {
   OperationState,
 } from '../domain/schemas';
 import type { DatasetMetadata } from '../geo-worker/api';
+import { DEFAULT_CITY_ID, type CityId } from '../domain/cities';
 
 export interface WorkspaceStore {
+  cityId: CityId;
   datasetVersion: string;
   datasetMetadata: DatasetMetadata | null;
   canonical: CanonicalWorkspace;
@@ -25,6 +27,7 @@ export interface WorkspaceStore {
 }
 
 export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
+  cityId: DEFAULT_CITY_ID,
   datasetVersion: DATASET_VERSION,
   datasetMetadata: null,
   canonical: structuredClone(EMPTY_CANONICAL),

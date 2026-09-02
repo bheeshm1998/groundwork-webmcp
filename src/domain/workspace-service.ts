@@ -1,4 +1,5 @@
-import { DATASET_VERSION, EMPTY_CANONICAL, EMPTY_DERIVED } from './defaults';
+import { DATASET_VERSION, EMPTY_DERIVED, emptyCanonical } from './defaults';
+import { CITIES, DEFAULT_CITY_ID, coordinateIsInCity, type CityId } from './cities';
 import {
   CanonicalWorkspaceSchema,
   type ActivityEntry,
@@ -75,6 +76,7 @@ function persist(): string | null {
   try {
     saveLocalWorkspace({
       schemaVersion: 1,
+      cityId: state.cityId,
       datasetVersion: state.datasetVersion,
       canonical: state.canonical,
       activity: state.activity,
@@ -102,36 +104,40 @@ function userMessage(error: unknown, fallback: string): string {
 export class WorkspaceService {
   private searchIndex: LocationResult[] = [];
 
-  async initialize(): Promise<CommandResult> {
+  async initialize(requestedCityId: CityId = DEFAULT_CITY_ID): Promise<CommandResult> {
     const store = useWorkspaceStore.getState();
     store.setOperation('calculating');
     try {
-      const initialized = await getGeoWorker().initialize();
-      this.searchIndex = initialized.search;
       let restored = null;
       try {
         const shared = readSharedWorkspace();
         const local = shared ? null : readLocalWorkspace();
         restored = shared ?? local;
-        if (restored && restored.datasetVersion !== initialized.metadata.datasetVersion) {
-          restored = null;
-          throw new Error(
-            shared
-              ? 'This share link uses a different map dataset and cannot be opened safely.'
-              : 'The saved workspace used an older map dataset and was not restored.',
-          );
-        }
       } catch (error) {
         store.commit({
           error:
             error instanceof Error ? error.message : 'The saved workspace could not be opened.',
         });
       }
-      const canonical = restored?.canonical ?? cloneCanonical(EMPTY_CANONICAL);
+      if (restored?.cityId === undefined) restored = { ...restored, cityId: DEFAULT_CITY_ID };
+      if (restored && !window.location.hash && restored.cityId !== requestedCityId) restored = null;
+      const cityId = restored?.cityId ?? requestedCityId;
+      const initialized = await getGeoWorker().initialize(cityId);
+      this.searchIndex = initialized.search;
+      if (restored && restored.datasetVersion !== initialized.metadata.datasetVersion) {
+        store.commit({
+          error: window.location.hash
+            ? 'This share link uses a different map dataset and cannot be opened safely.'
+            : 'The saved workspace used an older map dataset and was not restored.',
+        });
+        restored = null;
+      }
+      const canonical = restored?.canonical ?? emptyCanonical(cityId);
       const derived = canonical.conditions.length
         ? await getGeoWorker().analyze(canonical)
         : structuredClone(EMPTY_DERIVED);
       store.commit({
+        cityId,
         datasetVersion: initialized.metadata.datasetVersion,
         datasetMetadata: initialized.metadata,
         canonical,
@@ -142,7 +148,7 @@ export class WorkspaceService {
         analysisFreshness: canonical.combined ? 'fresh' : 'not-combined',
         initialized: true,
       });
-      return { ok: true, message: 'Groundwork is ready.' };
+      return { ok: true, message: `Groundwork is ready for ${CITIES[cityId].name}.` };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Groundwork could not initialize.';
       store.setOperation('error', message);
@@ -207,7 +213,7 @@ export class WorkspaceService {
         // The in-memory reset remains useful even when browser storage is unavailable.
       }
       state.commit({
-        canonical: cloneCanonical(EMPTY_CANONICAL),
+        canonical: emptyCanonical(state.cityId),
         derived: structuredClone(EMPTY_DERIVED),
         activity: [activity(commandMessage(command), command.actor)],
         undo: cloneCanonical(state.canonical),
@@ -229,6 +235,11 @@ export class WorkspaceService {
     try {
       switch (command.type) {
         case 'set-office':
+          if (!coordinateIsInCity(state.cityId, command.office.coordinates)) {
+            throw new Error(
+              `Choose a location inside the supported ${CITIES[state.cityId].name} area.`,
+            );
+          }
           canonical.office = command.office;
           canonical.selectedCandidateId = null;
           if (canonical.combined && canonical.conditions.some(({ kind }) => kind === 'bike')) {
@@ -384,6 +395,7 @@ export class WorkspaceService {
           ok: true,
           message: 'Workspace summary.',
           data: {
+            city: CITIES[state.cityId].name,
             office: state.canonical.office,
             conditions: state.canonical.conditions.map(({ id, label, kind, visible }) => ({
               id,
@@ -426,6 +438,7 @@ export class WorkspaceService {
             data: {
               url: createShareUrl({
                 schemaVersion: 1,
+                cityId: state.cityId,
                 datasetVersion: state.datasetVersion || DATASET_VERSION,
                 canonical: state.canonical,
                 activity: state.activity,

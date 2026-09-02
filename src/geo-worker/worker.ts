@@ -7,22 +7,24 @@ import { decodeGraphBinary } from './graph';
 import { gunzipSync } from 'fflate';
 import type { FeatureCollection, MultiPolygon, Polygon } from 'geojson';
 import type { DatasetMetadata } from './api';
+import { CITIES } from '../domain/cities';
 
 let engine: GeoEngine | null = null;
 
 const api: GeoWorkerApi = {
-  async initialize() {
-    const metadataResponse = await fetch('/data/sf/metadata.json');
+  async initialize(cityId) {
+    const city = CITIES[cityId];
+    const metadataResponse = await fetch(`${city.dataPath}/metadata.json`);
     if (!metadataResponse.ok)
-      throw new Error('The San Francisco dataset manifest could not be loaded.');
+      throw new Error(`The ${city.name} dataset manifest could not be loaded.`);
     const loadedMetadata = (await metadataResponse.json()) as DatasetMetadata;
     const [graphResponse, placesResponse, boundaryResponse, neighborhoodsResponse, labelsResponse] =
       await Promise.all([
-        fetch(`/data/sf/${loadedMetadata.assets.graph}`),
-        fetch(`/data/sf/${loadedMetadata.assets.places}`),
-        fetch(`/data/sf/${loadedMetadata.assets.boundary}`),
-        fetch(`/data/sf/${loadedMetadata.assets.neighborhoods}`),
-        fetch(`/data/sf/${loadedMetadata.assets.nodeLabels}`),
+        fetch(`${city.dataPath}/${loadedMetadata.assets.graph}`),
+        fetch(`${city.dataPath}/${loadedMetadata.assets.places}`),
+        fetch(`${city.dataPath}/${loadedMetadata.assets.boundary}`),
+        fetch(`${city.dataPath}/${loadedMetadata.assets.neighborhoods}`),
+        fetch(`${city.dataPath}/${loadedMetadata.assets.nodeLabels}`),
       ]);
     if (
       ![
@@ -33,7 +35,7 @@ const api: GeoWorkerApi = {
         labelsResponse,
       ].every((response) => response.ok)
     ) {
-      throw new Error('The San Francisco analysis dataset could not be loaded.');
+      throw new Error(`The ${city.name} analysis dataset could not be loaded.`);
     }
     const [graphBytes, loadedPlaces, boundary, neighborhoods, nodeLabels] = await Promise.all([
       graphResponse.arrayBuffer(),

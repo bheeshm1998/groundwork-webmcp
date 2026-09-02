@@ -1,4 +1,5 @@
 import type { CanonicalWorkspace, DerivedAnalysis } from '../domain/schemas';
+import type { CityId } from '../domain/cities';
 import type { PlacesData } from './engine';
 
 export interface DatasetMetadata {
@@ -17,6 +18,6 @@ export interface DatasetMetadata {
 }
 
 export interface GeoWorkerApi {
-  initialize(): Promise<{ metadata: DatasetMetadata; search: PlacesData['search'] }>;
+  initialize(cityId: CityId): Promise<{ metadata: DatasetMetadata; search: PlacesData['search'] }>;
   analyze(canonical: CanonicalWorkspace): Promise<DerivedAnalysis>;
 }

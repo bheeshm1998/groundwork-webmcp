@@ -1,6 +1,6 @@
 # Groundwork
 
-Groundwork is a fully client-side San Francisco housing-location workspace. It combines bicycle commute limits, pedestrian access to groceries and parks, and a personal map boundary; then it ranks separated candidate areas with explainable margins. The same workflow is available manually and through 17 capability-gated WebMCP tools.
+Groundwork is a fully client-side housing-location workspace for San Francisco and Hyderabad. Choose a city on the homepage, then combine bicycle commute limits, pedestrian access to groceries and parks, and a personal map boundary. Groundwork ranks separated candidate areas with explainable margins. The same workflow is available manually and through 17 capability-gated WebMCP tools.
 
 Groundwork is a planning aid, not a routing guarantee or housing listing service. It does not model live traffic, elevation, temporary closures, opening hours, accessibility, or housing availability.
 
@@ -8,11 +8,12 @@ Groundwork is a planning aid, not a routing guarantee or housing listing service
 
 The committed dataset contains only fetched public records:
 
-- OpenStreetMap streets, named POIs, supermarkets, groceries, convenience stores, and parks, obtained from a pinned San Francisco Overpass extract when `osmium` is unavailable. OSM data is licensed under ODbL 1.0.
+- OpenStreetMap streets, named POIs, supermarkets, groceries, convenience stores, and parks from checksum-pinned city extracts. OSM data is licensed under ODbL 1.0.
 - DataSF Analysis Neighborhoods (`j2bu-swwd`).
 - DataSF Bay Area County Polygons (`wamw-vt4s`), filtered to San Francisco for the analysis boundary.
+- OpenStreetMap's Hyderabad administrative boundary and GHMC ward polygons, sourced from the OpenCity ward dataset recorded on those OSM relations.
 
-[`public/data/sf/metadata.json`](public/data/sf/metadata.json) records every source URL, extract date, SHA-256, versioned asset filename, record count, and graph size. The build stops if a source cannot be fetched, an extract is unexpectedly small, or the contracted graph is 2 MB or larger after gzip. There is no synthetic fallback.
+Each city has an independent manifest: [`public/data/sf/metadata.json`](public/data/sf/metadata.json) and [`public/data/hyderabad/metadata.json`](public/data/hyderabad/metadata.json). They record source URLs, extract dates, SHA-256 checksums, versioned asset filenames, record counts, and graph sizes. The build stops if a source cannot be fetched, an extract is unexpectedly small, or the city-specific graph budget is exceeded. There is no synthetic fallback.
 
 ## Rebuild the dataset
 
@@ -21,9 +22,10 @@ Requirements: Node.js 22+ and npm. For the preferred Geofabrik workflow, install
 ```sh
 npm install
 npm run data:build
+npm run data:build:hyderabad
 ```
 
-The PBF path performs an `osmium extract` to the San Francisco bounding box, filters the required street/POI tags, and exports the source geometry. If `osmium` is unavailable, the documented Overpass path is used; neither path substitutes generated coordinates or records.
+The default build target is San Francisco. Pass `--city hyderabad` (or use `data:build:hyderabad`) for Hyderabad. The PBF path performs an `osmium extract` to the selected city's bounding box, filters the required street/POI tags, and exports the source geometry. If `osmium` is unavailable, the documented Overpass path is used; neither path substitutes generated coordinates or records.
 
 ## Run and test
 

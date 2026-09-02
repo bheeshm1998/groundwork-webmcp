@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { z } from 'zod';
 import { getCapabilities, type Capability } from '../domain/capabilities';
-import { SanFranciscoCoordinateSchema } from '../domain/schemas';
+import { CoordinateSchema } from '../domain/schemas';
+import { CITIES } from '../domain/cities';
 import { workspaceService } from '../domain/workspace-service';
 import { requestPreferenceDraw } from '../map/drawing';
 import { useWorkspaceStore } from '../store/workspace-store';
@@ -48,6 +49,8 @@ export function WebMCPBridge() {
   const freshness = useWorkspaceStore((state) => state.analysisFreshness);
   const hasUndo = useWorkspaceStore((state) => Boolean(state.undo));
   const initialized = useWorkspaceStore((state) => state.initialized);
+  const cityId = useWorkspaceStore((state) => state.cityId);
+  const city = CITIES[cityId];
   const registrations = useRef(new Map<Capability, AbortController>());
 
   useEffect(() => {
@@ -75,9 +78,8 @@ export function WebMCPBridge() {
     });
     register('search-locations', {
       name: 'groundwork_search_locations',
-      title: 'Search San Francisco locations',
-      description:
-        'Search for an office location inside San Francisco without changing the workspace.',
+      title: `Search ${city.name} locations`,
+      description: `Search for an office location inside ${city.name} without changing the workspace.`,
       inputSchema: objectSchema({ query: { type: 'string', minLength: 2 } }, ['query']),
       annotations: { readOnlyHint: true, untrustedContentHint: true },
       execute: (input) =>
@@ -91,7 +93,7 @@ export function WebMCPBridge() {
     register('set-office', {
       name: 'groundwork_set_office',
       title: 'Set office',
-      description: 'Set the office marker after resolving an unambiguous San Francisco location.',
+      description: `Set the office marker after resolving an unambiguous ${city.name} location.`,
       inputSchema: objectSchema(
         { label: { type: 'string' }, longitude: { type: 'number' }, latitude: { type: 'number' } },
         ['label', 'longitude', 'latitude'],
@@ -103,7 +105,7 @@ export function WebMCPBridge() {
             actor: 'agent',
             office: {
               label: z.string().min(1).parse(input.label),
-              coordinates: SanFranciscoCoordinateSchema.parse([input.longitude, input.latitude]),
+              coordinates: CoordinateSchema.parse([input.longitude, input.latitude]),
             },
           }),
         ),
@@ -125,8 +127,7 @@ export function WebMCPBridge() {
     register('add-access', {
       name: 'groundwork_add_access_condition',
       title: 'Add nearby-place condition',
-      description:
-        'Create a pedestrian-network walking area from real OSM groceries or parks in San Francisco.',
+      description: `Create a pedestrian-network walking area from real OSM groceries or parks in ${city.name}.`,
       inputSchema: objectSchema(
         {
           category: { type: 'string', enum: ['grocery', 'park'] },
@@ -302,7 +303,7 @@ export function WebMCPBridge() {
         registrations.current.delete(capability);
       }
     }
-  }, [canonical, derived, freshness, hasUndo, initialized]);
+  }, [canonical, city.name, derived, freshness, hasUndo, initialized]);
 
   useEffect(
     () => () => {

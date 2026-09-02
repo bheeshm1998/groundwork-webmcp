@@ -14,7 +14,8 @@
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "data:build": "tsx data/scripts/build-osm-assets.ts"
+    "data:build": "tsx data/scripts/build-osm-assets.ts",
+    "data:build:hyderabad": "tsx data/scripts/build-osm-assets.ts --city hyderabad"
   },
   "dependencies": {
     "@turf/area": "^7.2.0",

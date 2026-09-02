@@ -12,6 +12,7 @@ import { cancelPreferenceDraw, completePreferenceDraw } from './drawing';
 import { useWorkspaceStore } from '../store/workspace-store';
 import { workspaceSnapshot } from '../store/workspace-store';
 import type { CanonicalWorkspace, DerivedAnalysis } from '../domain/schemas';
+import { CITIES } from '../domain/cities';
 
 maplibregl.setWorkerUrl(workerUrl);
 
@@ -21,11 +22,13 @@ function setSourceData(map: MapLibreMap, source: string, data: FeatureCollection
   (map.getSource(source) as GeoJSONSource | undefined)?.setData(data);
 }
 
+const FALLBACK_MAP_STYLE = 'https://tiles.openfreemap.org/styles/bright';
+
 function getMapStyle(): string {
   const key = import.meta.env.VITE_MAPTILER_KEY;
   return key
     ? `https://api.maptiler.com/maps/streets-v2/style.json?key=${key}`
-    : 'https://tiles.openfreemap.org/styles/bright';
+    : FALLBACK_MAP_STYLE;
 }
 
 function syncWorkspaceSources(
@@ -78,6 +81,8 @@ export function MapView() {
   const canonical = useWorkspaceStore((state) => state.canonical);
   const office = useWorkspaceStore((state) => state.canonical.office);
   const derived = useWorkspaceStore((state) => state.derived);
+  const cityId = useWorkspaceStore((state) => state.cityId);
+  const city = CITIES[cityId];
   const initialViewRef = useRef(canonical.view);
 
   useEffect(() => {
@@ -92,10 +97,7 @@ export function MapView() {
         bearing: initialViewRef.current.bearing,
         pitch: initialViewRef.current.pitch,
         attributionControl: false,
-        maxBounds: [
-          [-122.56, 37.67],
-          [-122.31, 37.85],
-        ],
+        maxBounds: city.mapBounds,
       });
     } catch {
       setMapError('The interactive map could not start in this browser.');
@@ -107,8 +109,7 @@ export function MapView() {
     map.addControl(
       new maplibregl.AttributionControl({
         compact: true,
-        customAttribution:
-          'Analysis and map data © OpenStreetMap contributors (ODbL) · Neighborhoods DataSF',
+        customAttribution: `Analysis and map data © OpenStreetMap contributors (ODbL) · ${city.neighborhoodAttribution}`,
       }),
       'bottom-right',
     );
@@ -120,8 +121,15 @@ export function MapView() {
     drawControlRef.current = drawControl;
     map.addControl(drawControl, 'bottom-left');
 
+    let attemptedFallbackStyle = !import.meta.env.VITE_MAPTILER_KEY;
     const onMapError = () => {
-      if (!map.isStyleLoaded()) setMapError('The base map could not be loaded.');
+      if (map.isStyleLoaded()) return;
+      if (!attemptedFallbackStyle) {
+        attemptedFallbackStyle = true;
+        map.setStyle(FALLBACK_MAP_STYLE);
+        return;
+      }
+      setMapError('The base map could not be loaded.');
     };
     map.on('error', onMapError);
 
@@ -310,7 +318,7 @@ export function MapView() {
       map.remove();
       mapRef.current = null;
     };
-  }, [mapAttempt]);
+  }, [city, mapAttempt]);
 
   useEffect(() => {
     const draw = drawControlRef.current?.getTerraDrawInstance();
@@ -374,7 +382,7 @@ export function MapView() {
       <div
         ref={containerRef}
         className="map-canvas"
-        aria-label="Interactive San Francisco analysis map"
+        aria-label={`Interactive ${city.name} analysis map`}
       />
       {mapError ? (
         <div className="map-error" role="alert">

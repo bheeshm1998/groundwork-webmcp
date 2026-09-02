@@ -297,6 +297,52 @@ input:focus {
   font-size: 12px;
 }
 
+.city-picker {
+  display: grid;
+  gap: 12px;
+  max-width: 430px;
+}
+
+.city-picker > span {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.city-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.city-option {
+  display: grid;
+  justify-items: start;
+  min-height: 68px;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.city-option strong {
+  font-size: 14px;
+}
+
+.city-option span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.city-option.selected {
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(47, 107, 79, 0.1);
+}
+
+.city-picker .primary-link {
+  justify-self: start;
+}
+
 .hero-preview {
   overflow: hidden;
   border: 1px solid #dce2da;
@@ -1561,6 +1607,10 @@ summary {
 
   .hero-preview {
     border-radius: 13px;
+  }
+
+  .city-options {
+    grid-template-columns: 1fr;
   }
 
   .search-control {

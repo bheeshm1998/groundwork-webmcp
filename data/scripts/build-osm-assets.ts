@@ -37,24 +37,50 @@ type Place = {
 };
 
 const projectRoot = resolve(import.meta.dirname, '../..');
-const outputDirectory = join(projectRoot, 'public/data/sf');
 const sourceDirectory = join(projectRoot, 'data/source');
 const buildDate = new Date().toISOString().slice(0, 10);
-const datasetVersion = `sf-osm-datasf-${buildDate}-v2`;
-const bbox = '37.69,-122.53,37.83,-122.34';
 const overpassUrl = 'https://overpass-api.de/api/interpreter';
-const neighborhoodUrl = 'https://data.sfgov.org/resource/j2bu-swwd.geojson?$limit=100';
-const boundaryUrl =
-  'https://data.sfgov.org/resource/wamw-vt4s.geojson?$limit=50&$where=county%3D%27San%20Francisco%27';
+const requestedCity = process.argv[process.argv.indexOf('--city') + 1] ?? 'sf';
+const cityConfigs = {
+  sf: {
+    slug: 'sf',
+    name: 'San Francisco',
+    bbox: '37.69,-122.53,37.83,-122.34',
+    osmiumBbox: '-122.53,37.69,-122.34,37.83',
+    datasetVersion: `sf-osm-datasf-${buildDate}-v2`,
+    maxGraphBytes: 2 * 1024 * 1024,
+    neighborhoodUrl: 'https://data.sfgov.org/resource/j2bu-swwd.geojson?$limit=100',
+    boundaryUrl:
+      'https://data.sfgov.org/resource/wamw-vt4s.geojson?$limit=50&$where=county%3D%27San%20Francisco%27',
+    extraOverpass: '',
+  },
+  hyderabad: {
+    slug: 'hyderabad',
+    name: 'Hyderabad',
+    bbox: '17.20,78.29,17.56,78.67',
+    osmiumBbox: '78.29,17.20,78.67,17.56',
+    datasetVersion: `hyderabad-osm-${buildDate}-v1`,
+    maxGraphBytes: 8 * 1024 * 1024,
+    neighborhoodUrl: null,
+    boundaryUrl: null,
+    extraOverpass:
+      'relation(7868535);\n  relation["boundary"="administrative"]["admin_level"="10"](17.20,78.29,17.56,78.67);',
+  },
+} as const;
+if (!(requestedCity in cityConfigs)) throw new Error(`Unsupported city: ${requestedCity}`);
+const city = cityConfigs[requestedCity as keyof typeof cityConfigs];
+const outputDirectory = join(projectRoot, 'public/data', city.slug);
+const datasetVersion = city.datasetVersion;
 const overpassQuery = `[out:json][timeout:300];
 (
-  way["highway"](${bbox});
-  nwr["shop"~"^(supermarket|grocery|convenience)$"](${bbox});
-  nwr["leisure"="park"](${bbox});
-  nwr["name"]["amenity"](${bbox});
-  nwr["name"]["shop"](${bbox});
-  nwr["name"]["tourism"](${bbox});
-  nwr["name"]["leisure"](${bbox});
+  way["highway"](${city.bbox});
+  nwr["shop"~"^(supermarket|grocery|convenience)$"](${city.bbox});
+  nwr["leisure"="park"](${city.bbox});
+  nwr["name"]["amenity"](${city.bbox});
+  nwr["name"]["shop"](${city.bbox});
+  nwr["name"]["tourism"](${city.bbox});
+  nwr["name"]["leisure"](${city.bbox});
+  ${city.extraOverpass}
 );
 out center geom;`;
 
@@ -222,13 +248,13 @@ async function loadPbfSource(pbfPath: string) {
     );
   const temporaryDirectory = await mkdtemp(join(tmpdir(), 'groundwork-osmium-'));
   try {
-    const extractPath = join(temporaryDirectory, 'sf.osm.pbf');
-    const filteredPath = join(temporaryDirectory, 'sf-filtered.osm.pbf');
-    const sequencePath = join(temporaryDirectory, 'sf.geojsonseq');
+    const extractPath = join(temporaryDirectory, `${city.slug}.osm.pbf`);
+    const filteredPath = join(temporaryDirectory, `${city.slug}-filtered.osm.pbf`);
+    const sequencePath = join(temporaryDirectory, `${city.slug}.geojsonseq`);
     run('osmium', [
       'extract',
       '--bbox',
-      '-122.53,37.69,-122.34,37.83',
+      city.osmiumBbox,
       pbfPath,
       '--output',
       extractPath,
@@ -260,7 +286,7 @@ async function loadPbfSource(pbfPath: string) {
       .map((line) => osmiumFeatureToElement(JSON.parse(line)))
       .filter((element): element is OverpassElement => Boolean(element));
     if (!elements.length)
-      throw new Error('The osmium San Francisco export contains no usable elements.');
+      throw new Error(`The osmium ${city.name} export contains no usable elements.`);
     const timestamp = run('osmium', [
       'fileinfo',
       '-g',
@@ -272,7 +298,7 @@ async function loadPbfSource(pbfPath: string) {
       responseBytes: new Uint8Array(),
       extractDate: timestamp.slice(0, 10) || buildDate,
       cacheName: null,
-      sourceName: 'Geofabrik Northern California PBF via osmium',
+      sourceName: `Geofabrik PBF ${city.name} extract via osmium`,
       sourceUrl,
       sourceSha256: await fileSha256(pbfPath),
       querySha256: null,
@@ -288,7 +314,11 @@ async function loadOsmSource() {
     else return loadPbfSource(process.env.OSM_PBF_PATH);
   }
   const cached = (await readdir(sourceDirectory))
-    .filter((name) => /^overpass-sf-\d{4}-\d{2}-\d{2}-[a-f0-9]{12}\.json\.gz$/u.test(name))
+    .filter((name) =>
+      new RegExp(`^overpass-${city.slug}-\\d{4}-\\d{2}-\\d{2}-[a-f0-9]{12}\\.json\\.gz$`, 'u').test(
+        name,
+      ),
+    )
     .sort()
     .at(-1);
   const responseBytes = cached
@@ -310,7 +340,7 @@ async function loadOsmSource() {
   if (!payload.elements?.length) throw new Error('The Overpass extract contains no OSM elements.');
   const extractDate = payload.osm3s?.timestamp_osm_base?.slice(0, 10) ?? buildDate;
   const cacheName =
-    cached ?? `overpass-sf-${extractDate}-${sha256(responseBytes).slice(0, 12)}.json.gz`;
+    cached ?? `overpass-${city.slug}-${extractDate}-${sha256(responseBytes).slice(0, 12)}.json.gz`;
   if (!cached)
     await writeFile(join(sourceDirectory, cacheName), gzipSync(responseBytes, { level: 9 }));
   return {
@@ -318,7 +348,7 @@ async function loadOsmSource() {
     responseBytes,
     extractDate,
     cacheName,
-    sourceName: 'OpenStreetMap Overpass SF extract (osmium fallback)',
+    sourceName: `OpenStreetMap Overpass ${city.name} extract (osmium fallback)`,
     sourceUrl: overpassUrl,
     sourceSha256: sha256(responseBytes),
     querySha256: sha256(overpassQuery),
@@ -573,28 +603,92 @@ function parseFeatureCollection(bytes: Uint8Array) {
   return collection;
 }
 
+function areaFeatureFromElement(
+  element: OverpassElement,
+  properties: Record<string, unknown>,
+): Feature<Polygon | MultiPolygon> | null {
+  const parts =
+    element.type === 'relation'
+      ? (element.members ?? [])
+          .filter(({ role, geometry }) => role === 'outer' && geometry)
+          .map(({ geometry }) => geometry!.map(({ lon, lat }) => [lon, lat] as Coordinate))
+      : geometryCoordinates(element).length
+        ? [geometryCoordinates(element)]
+        : [];
+  const rings = stitchRings(parts);
+  if (!rings.length) return null;
+  return {
+    type: 'Feature',
+    properties,
+    geometry:
+      rings.length === 1
+        ? { type: 'Polygon', coordinates: [rings[0]!] }
+        : { type: 'MultiPolygon', coordinates: rings.map((ring) => [ring]) },
+  };
+}
+
 async function main() {
   await mkdir(outputDirectory, { recursive: true });
   await mkdir(sourceDirectory, { recursive: true });
-  const [osm, neighborhoodBytes, boundaryBytes] = await Promise.all([
-    loadOsmSource(),
-    fetchPinned(neighborhoodUrl),
-    fetchPinned(boundaryUrl),
-  ]);
-  const neighborhoods = parseFeatureCollection(neighborhoodBytes),
-    boundaryCollection = parseFeatureCollection(boundaryBytes);
-  const boundaryFeature = boundaryCollection.features.find(
-    (feature) => feature.properties?.county === 'San Francisco',
-  );
-  if (!boundaryFeature) throw new Error('DataSF did not return the San Francisco county polygon.');
+  const osm = await loadOsmSource();
+  let neighborhoods: FeatureCollection<Polygon | MultiPolygon>;
+  let boundaryFeature: Feature<Polygon | MultiPolygon> | undefined;
+  let neighborhoodBytes: Uint8Array | null = null;
+  let boundaryBytes: Uint8Array | null = null;
+  if (city.slug === 'sf') {
+    [neighborhoodBytes, boundaryBytes] = await Promise.all([
+      fetchPinned(city.neighborhoodUrl),
+      fetchPinned(city.boundaryUrl),
+    ]);
+    neighborhoods = parseFeatureCollection(neighborhoodBytes);
+    const boundaryCollection = parseFeatureCollection(boundaryBytes);
+    boundaryFeature = boundaryCollection.features.find(
+      (feature) => feature.properties?.county === 'San Francisco',
+    );
+    if (!boundaryFeature)
+      throw new Error('DataSF did not return the San Francisco county polygon.');
+  } else {
+    const boundaryElement = osm.payload.elements!.find(
+      (element) => element.type === 'relation' && element.id === 7868535,
+    );
+    boundaryFeature = boundaryElement
+      ? (areaFeatureFromElement(boundaryElement, {
+          name: 'Hyderabad',
+          source: boundaryElement.tags?.source,
+        }) ?? undefined)
+      : undefined;
+    neighborhoods = {
+      type: 'FeatureCollection',
+      features: osm.payload
+        .elements!.filter(
+          (element) =>
+            element.type === 'relation' &&
+            element.tags?.boundary === 'administrative' &&
+            element.tags?.admin_level === '10' &&
+            Boolean(element.tags.name),
+        )
+        .map((element) =>
+          areaFeatureFromElement(element, {
+            nhood: element.tags!.name!.replace(/^Ward \d+\s*/u, ''),
+            name: element.tags!.name,
+            source: element.tags!.source,
+          }),
+        )
+        .filter((feature): feature is Feature<Polygon | MultiPolygon> => Boolean(feature)),
+    };
+    if (!boundaryFeature)
+      throw new Error('OpenStreetMap did not return the Hyderabad city polygon.');
+    if (neighborhoods.features.length < 50)
+      throw new Error('OpenStreetMap returned too few Hyderabad ward polygons.');
+  }
   const network = buildRawNetwork(osm.payload.elements!),
     graph = contractNetwork(network.coordinates, network.edges);
   if (graph.nodes.length < 1000 || graph.targets.length < 2000)
     throw new Error('The extracted street graph is unexpectedly small.');
   const compressedGraph = gzipSync(encodeGraph(graph), { level: 9 });
-  if (compressedGraph.byteLength >= 2 * 1024 * 1024)
+  if (compressedGraph.byteLength >= city.maxGraphBytes)
     throw new Error(
-      `Graph exceeds 2 MB gzipped (${(compressedGraph.byteLength / 1024 / 1024).toFixed(2)} MB).`,
+      `Graph exceeds ${(city.maxGraphBytes / 1024 / 1024).toFixed(0)} MB gzipped (${(compressedGraph.byteLength / 1024 / 1024).toFixed(2)} MB).`,
     );
   const places = buildPlaces(osm.payload.elements!);
   for (const [name, sum] of network.streetPoints)
@@ -619,9 +713,12 @@ async function main() {
   const metadata = {
     datasetVersion,
     generatedAt: new Date().toISOString(),
-    coverage: 'City and County of San Francisco, California',
+    coverage:
+      city.slug === 'sf'
+        ? 'City and County of San Francisco, California'
+        : 'Hyderabad, Telangana, India',
     attribution: '© OpenStreetMap contributors',
-    license: 'ODbL 1.0 (OSM); PDDL 1.0 (DataSF)',
+    license: city.slug === 'sf' ? 'ODbL 1.0 (OSM); PDDL 1.0 (DataSF)' : 'ODbL 1.0 (OSM)',
     graphFormat: 'groundwork-graph-v2',
     method: 'Contracted street graph with directed bicycle times and pedestrian-network times.',
     assets: {
@@ -649,18 +746,29 @@ async function main() {
         querySha256: osm.querySha256,
         cachedAs: osm.cacheName,
       },
-      {
-        name: 'DataSF Analysis Neighborhoods (j2bu-swwd)',
-        url: neighborhoodUrl,
-        extractDate: buildDate,
-        sha256: sha256(neighborhoodBytes),
-      },
-      {
-        name: 'DataSF Bay Area County Polygons (wamw-vt4s), San Francisco filter',
-        url: boundaryUrl,
-        extractDate: buildDate,
-        sha256: sha256(boundaryBytes),
-      },
+      ...(city.slug === 'sf' && neighborhoodBytes && boundaryBytes
+        ? [
+            {
+              name: 'DataSF Analysis Neighborhoods (j2bu-swwd)',
+              url: city.neighborhoodUrl,
+              extractDate: buildDate,
+              sha256: sha256(neighborhoodBytes),
+            },
+            {
+              name: 'DataSF Bay Area County Polygons (wamw-vt4s), San Francisco filter',
+              url: city.boundaryUrl,
+              extractDate: buildDate,
+              sha256: sha256(boundaryBytes),
+            },
+          ]
+        : [
+            {
+              name: 'OpenStreetMap Hyderabad administrative boundary and GHMC wards',
+              url: overpassUrl,
+              extractDate: osm.extractDate,
+              sha256: osm.sourceSha256,
+            },
+          ]),
     ],
   };
   await Promise.all([

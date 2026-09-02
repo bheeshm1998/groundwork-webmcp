@@ -1,0 +1,41 @@
+{
+  "datasetVersion": "hyderabad-osm-2026-09-02-v1",
+  "generatedAt": "2026-09-02T04:40:02.996Z",
+  "coverage": "Hyderabad, Telangana, India",
+  "attribution": "© OpenStreetMap contributors",
+  "license": "ODbL 1.0 (OSM)",
+  "graphFormat": "groundwork-graph-v2",
+  "method": "Contracted street graph with directed bicycle times and pedestrian-network times.",
+  "assets": {
+    "graph": "graph-hyderabad-osm-2026-09-02-v1.bin.gz",
+    "places": "places-hyderabad-osm-2026-09-02-v1.json",
+    "neighborhoods": "neighborhoods-hyderabad-osm-2026-09-02-v1.geojson",
+    "boundary": "boundary-hyderabad-osm-2026-09-02-v1.geojson",
+    "nodeLabels": "node-labels-hyderabad-osm-2026-09-02-v1.json"
+  },
+  "counts": {
+    "graphNodes": 263613,
+    "directedEdges": 699229,
+    "groceries": 447,
+    "parks": 469,
+    "searchEntries": 17336,
+    "neighborhoods": 147
+  },
+  "compressedGraphBytes": 5411957,
+  "sources": [
+    {
+      "name": "OpenStreetMap Overpass Hyderabad extract (osmium fallback)",
+      "url": "https://overpass-api.de/api/interpreter",
+      "extractDate": "2026-09-02",
+      "sha256": "7b2bbe41ec245dce299011a4246768bc485f5263d47676f37dbb2b860ec48243",
+      "querySha256": "6aa1f9988b5518e653b0e623bee526f9e2d7a3545bcc77036815d603e95de550",
+      "cachedAs": "overpass-hyderabad-2026-09-02-7b2bbe41ec24.json.gz"
+    },
+    {
+      "name": "OpenStreetMap Hyderabad administrative boundary and GHMC wards",
+      "url": "https://overpass-api.de/api/interpreter",
+      "extractDate": "2026-09-02",
+      "sha256": "7b2bbe41ec245dce299011a4246768bc485f5263d47676f37dbb2b860ec48243"
+    }
+  ]
+}

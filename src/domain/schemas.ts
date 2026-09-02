@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Feature, MultiPolygon, Point, Polygon } from 'geojson';
+import { CITY_IDS } from './cities';
 
 export type AreaGeometry = Feature<Polygon | MultiPolygon>;
 export type PointFeature = Feature<Point>;
@@ -10,11 +11,7 @@ export const CoordinateSchema = z.tuple([
 ]);
 export type Coordinate = z.infer<typeof CoordinateSchema>;
 
-export const SanFranciscoCoordinateSchema = CoordinateSchema.refine(
-  ([longitude, latitude]) =>
-    longitude >= -122.53 && longitude <= -122.34 && latitude >= 37.69 && latitude <= 37.83,
-  'Choose a location inside the supported San Francisco area.',
-);
+export const CityIdSchema = z.enum(CITY_IDS);
 
 const LinearRingSchema = z
   .array(CoordinateSchema)
@@ -85,7 +82,7 @@ export type Condition = z.infer<typeof ConditionSchema>;
 
 export const OfficeSchema = z.object({
   label: z.string().min(1),
-  coordinates: SanFranciscoCoordinateSchema,
+  coordinates: CoordinateSchema,
 });
 export type Office = z.infer<typeof OfficeSchema>;
 
@@ -171,6 +168,7 @@ export interface DerivedAnalysis {
 
 export const WorkspaceShareSchema = z.object({
   schemaVersion: z.literal(1),
+  cityId: CityIdSchema.optional(),
   datasetVersion: z.string(),
   canonical: CanonicalWorkspaceSchema,
   activity: z.array(ActivityEntrySchema).max(40),

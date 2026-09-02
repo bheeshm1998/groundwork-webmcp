@@ -3,6 +3,7 @@ import { EMPTY_CANONICAL, EMPTY_DERIVED, SAMPLE_OFFICE } from './defaults';
 import type { CanonicalWorkspace, DerivedAnalysis } from './schemas';
 import { STORAGE_KEY } from '../sharing/share';
 import { useWorkspaceStore } from '../store/workspace-store';
+import { CITIES } from './cities';
 
 const worker = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -71,6 +72,7 @@ function analysisFor(canonical: CanonicalWorkspace): DerivedAnalysis {
 
 function resetStore() {
   useWorkspaceStore.setState({
+    cityId: 'sf',
     canonical: structuredClone(EMPTY_CANONICAL),
     derived: structuredClone(EMPTY_DERIVED),
     activity: [],
@@ -140,6 +142,27 @@ describe('WorkspaceService', () => {
       true,
     );
     expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull();
+  });
+
+  it('loads Hyderabad independently and rejects coordinates from the other city', async () => {
+    await workspaceService.initialize('hyderabad');
+
+    expect(worker.initialize).toHaveBeenCalledWith('hyderabad');
+    expect(useWorkspaceStore.getState().cityId).toBe('hyderabad');
+    expect(useWorkspaceStore.getState().canonical.view.center).toEqual(CITIES.hyderabad.center);
+
+    await expect(
+      workspaceService.execute({ type: 'set-office', office: SAMPLE_OFFICE }),
+    ).resolves.toMatchObject({
+      ok: false,
+      message: 'Choose a location inside the supported Hyderabad area.',
+    });
+    await expect(
+      workspaceService.execute({
+        type: 'set-office',
+        office: CITIES.hyderabad.sampleOffice,
+      }),
+    ).resolves.toMatchObject({ ok: true });
   });
 
   it('marks bike-dependent combined analysis stale until it is recalculated', async () => {

@@ -11,6 +11,7 @@ import {
 
 const payload = {
   schemaVersion: 1 as const,
+  cityId: 'sf' as const,
   datasetVersion: DATASET_VERSION,
   canonical: EMPTY_CANONICAL,
   activity: [],

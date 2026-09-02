@@ -9,8 +9,8 @@ test.describe('Groundwork manual flow', () => {
     await expect(
       page.getByRole('heading', { name: 'Find a place that fits your everyday life.' }),
     ).toBeVisible();
-    await page.getByRole('link', { name: 'Start planning' }).click();
-    await expect(page).toHaveURL(/\/app$/u);
+    await page.getByRole('link', { name: 'Plan in San Francisco' }).click();
+    await expect(page).toHaveURL(/\/app\?city=sf$/u);
     await expect(page.getByRole('heading', { name: 'Where do you need to go?' })).toBeVisible();
     await page.getByTestId('load-sample').click();
     await expect(page.getByTestId('candidate-list')).toBeVisible({ timeout: 20_000 });
@@ -40,8 +40,25 @@ test.describe('Groundwork manual flow', () => {
     });
   });
 
+  test('selects Hyderabad on the homepage and completes a local analysis', async ({ page }) => {
+    test.setTimeout(90_000);
+    await page.goto('/');
+    await page.getByRole('button', { name: /Hyderabad India/u }).click();
+    await page.getByRole('link', { name: 'Plan in Hyderabad' }).click();
+
+    await expect(page).toHaveURL(/\/app\?city=hyderabad$/u);
+    await expect(page.getByText('Search Hyderabad')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByLabel('Interactive Hyderabad analysis map')).toBeVisible();
+    await page.getByTestId('load-sample').click();
+    await expect(page.getByText('Ramanthapur', { exact: true }).first()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId('candidate-list')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/of Hyderabad fits your current priorities/u)).toBeVisible();
+  });
+
   test('works without WebMCP support', async ({ page }) => {
-    await page.goto('/app');
+    await page.goto('/app?city=sf');
     await page.getByRole('button', { name: 'Workspace' }).click();
     await expect(page.getByText(/using Groundwork manually/u)).toBeVisible();
     await page.getByRole('button', { name: 'Close workspace options' }).click();
