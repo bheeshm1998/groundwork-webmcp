@@ -41,14 +41,18 @@ npm run test:e2e
 
 ## Enable WebMCP
 
-Use a browser build that exposes `document.modelContext`. For a production release, obtain an origin-trial token for the exact final HTTPS origin and set:
+SweetSpot initializes `@mcp-b/webmcp-polyfill` before React mounts. The polyfill installs `document.modelContext` only when the browser does not already provide the native API, so the same registered tools work in ordinary browsers and native WebMCP builds.
+
+The polyfill provides the in-page WebMCP runtime; an AI client still needs a compatible MCP-B browser extension or relay to discover those tools. A browser with a native WebMCP assistant uses its native implementation because MCP-B does not replace it.
+
+For a production release using Chrome's native origin trial, obtain a token for the exact final HTTPS origin and set:
 
 ```sh
 VITE_WEBMCP_ORIGIN_TRIAL_TOKEN=your_exact_origin_token
 npm run build:release
 ```
 
-`build:release` intentionally fails when the token is missing. The application remains usable in manual mode when WebMCP is unavailable. Existing WebMCP tool names and signatures are stable.
+`build:release` intentionally fails when the token is missing. Local development does not require the token: MCP-B supplies the compatibility runtime at `localhost`. Existing WebMCP tool names and signatures are stable.
 
 ## License
 

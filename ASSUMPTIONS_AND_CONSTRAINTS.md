@@ -42,7 +42,7 @@ Last reviewed: 2026-09-02
 
 - Base-map tiles require network access. Analysis, pedestrian/bicycle routing, candidate naming, and search remain local. A failed map/style load shows a retryable fallback while panel results remain usable.
 - Search uses the bundled OSM index of named POIs and street names. `VITE_MAPTILER_KEY` changes only the base-map provider; public keys must be origin-restricted.
-- Browsers without `document.modelContext` run in manual mode. The page does not claim agent tools are registered in that mode.
+- Browsers without native `document.modelContext` use the pinned MCP-B polyfill. This makes the tool-registration surface available but does not by itself connect an AI client; discovery still requires a compatible MCP-B extension/relay or a native browser assistant.
 - A deployed WebMCP release requires `VITE_WEBMCP_ORIGIN_TRIAL_TOKEN` for the exact final origin. `npm run build:release` and the Vercel build fail if it is absent. Ordinary `npm run build` intentionally remains available for local/manual verification and omits an empty origin-trial tag.
 - WebMCP write results are compact summaries; full GeoJSON stays inside the page. Capability changes are diffed so unrelated state updates do not abort and re-register stable tools.
 
