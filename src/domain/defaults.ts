@@ -1,12 +1,12 @@
 import type { CanonicalWorkspace, DerivedAnalysis } from './schemas';
 import { CITIES, DEFAULT_CITY_ID, type CityId } from './cities';
 
-export const DATASET_VERSION = 'sf-osm-datasf-2026-09-02-v2';
+export const DATASET_VERSION = 'sf-osm-datasf-2026-09-03-v3';
 
 export function emptyCanonical(cityId: CityId = DEFAULT_CITY_ID): CanonicalWorkspace {
   const city = CITIES[cityId];
   return {
-    office: null,
+    destinations: [],
     conditions: [],
     selectedCandidateId: null,
     removedCandidateIds: [],
@@ -24,5 +24,3 @@ export const EMPTY_DERIVED: DerivedAnalysis = {
   candidates: [],
   restriction: null,
 };
-
-export const SAMPLE_OFFICE = CITIES.sf.sampleOffice;

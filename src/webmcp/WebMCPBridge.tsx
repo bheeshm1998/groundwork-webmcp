@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { MaybePromise, ModelContextTool } from '@mcp-b/webmcp-types';
 import { z } from 'zod';
 import { getCapabilities, type Capability } from '../domain/capabilities';
-import { CoordinateSchema } from '../domain/schemas';
+import { ACCESS_MODES, CoordinateSchema, PLACE_CATEGORIES, TRAVEL_MODES } from '../domain/schemas';
 import { CITIES } from '../domain/cities';
 import { workspaceService } from '../domain/workspace-service';
 import { requestPreferenceDraw } from '../map/drawing';
@@ -14,26 +14,26 @@ const objectSchema = (properties: Readonly<Record<string, unknown>>, required: s
   required,
   additionalProperties: false,
 });
-const bikeMinutesProperty = {
+const travelMinutesProperty = {
   type: 'number',
   minimum: 5,
   maximum: 90,
-  description: 'One-way time limit in minutes.',
+  description: 'One-way network travel limit in minutes.',
 };
-const accessMinutesProperty = {
+const placeMinutesProperty = {
   type: 'number',
   minimum: 1,
   maximum: 45,
-  description: 'One-way time limit in minutes.',
+  description: 'One-way network travel limit in minutes.',
 };
 const updateMinutesProperty = {
   type: 'number',
   minimum: 1,
   maximum: 90,
-  description: 'One-way time limit in minutes; bicycle conditions require at least 5.',
+  description: 'One-way minutes; travel conditions require 5–90 and place conditions 1–45.',
 };
 
-type GroundworkTool = Omit<ModelContextTool<Record<string, unknown>>, 'execute'> & {
+type SweetSpotTool = Omit<ModelContextTool<Record<string, unknown>>, 'execute'> & {
   execute: (
     input: Record<string, unknown>,
     registrationSignal: AbortSignal,
@@ -49,12 +49,39 @@ async function safeToolResult<T>(operation: () => Promise<T> | T) {
       message:
         error instanceof z.ZodError
           ? 'Invalid tool input.'
-          : error instanceof Error && /cancel/i.test(error.message)
+          : error instanceof Error && /cancel/iu.test(error.message)
             ? 'The operation was cancelled.'
             : 'The tool could not complete.',
     };
   }
 }
+
+async function runAgentAction<T>(label: string, operation: () => Promise<T> | T): Promise<T> {
+  useWorkspaceStore.getState().commit({ activeAgentAction: label });
+  try {
+    return await operation();
+  } finally {
+    useWorkspaceStore.getState().commit({ activeAgentAction: null });
+  }
+}
+
+const UpdateInputSchema = z
+  .object({
+    id: z.string().min(1),
+    maxMinutes: z.number().min(1).max(90).optional(),
+    destinationId: z.string().min(1).optional(),
+    mode: z.enum(TRAVEL_MODES).optional(),
+    category: z.enum(PLACE_CATEGORIES).optional(),
+    groceryType: z.enum(['supermarket', 'supermarket_or_grocery']).optional(),
+  })
+  .refine(
+    ({ maxMinutes, destinationId, mode, category, groceryType }) =>
+      maxMinutes !== undefined ||
+      destinationId !== undefined ||
+      mode !== undefined ||
+      category !== undefined ||
+      groceryType !== undefined,
+  );
 
 export function WebMCPBridge() {
   const canonical = useWorkspaceStore((state) => state.canonical);
@@ -79,7 +106,7 @@ export function WebMCPBridge() {
       operation,
       drawingReady,
     );
-    const register = (capability: Parameters<typeof capabilities.has>[0], tool: GroundworkTool) => {
+    const register = (capability: Capability, tool: SweetSpotTool) => {
       if (!capabilities.has(capability) || registrations.current.has(capability)) return;
       const controller = new AbortController();
       registrations.current.set(capability, controller);
@@ -97,267 +124,320 @@ export function WebMCPBridge() {
       void registration.catch(() => registrations.current.delete(capability));
     };
 
-    register('get-workspace', {
-      name: 'groundwork_get_workspace',
+    register('get_workspace', {
+      name: 'get_workspace',
       title: 'Read SweetSpot workspace',
       description:
-        'Read the authoritative visible workspace, supported analysis types, and current results. Call this before presenting recommendations; never claim a constraint that is absent from this response.',
+        'Read the authoritative visible destinations, conditions, supported enums, and results. Call before recommending an area. Distance limits are unsupported: convert them to travel minutes, disclose the conversion, and never claim an absent constraint.',
       annotations: { readOnlyHint: true },
-      execute: () => workspaceService.query({ type: 'get-workspace' }),
+      execute: () =>
+        runAgentAction('Reading the workspace', () =>
+          workspaceService.query({ type: 'get-workspace' }),
+        ),
     });
-    register('search-locations', {
-      name: 'groundwork_search_locations',
+    register('search_locations', {
+      name: 'search_locations',
       title: `Search ${city.name} locations`,
-      description: `Search local and online OpenStreetMap results for a company, address, street, or landmark inside ${city.name} without changing the workspace. If more than one plausible office is returned, ask the user which one they mean before setting it.`,
+      description: `Search local and online OpenStreetMap results inside ${city.name} without changing the workspace. Ask before choosing among ambiguous matches; never guess coordinates.`,
       inputSchema: objectSchema({ query: { type: 'string', minLength: 2 } }, ['query']),
       annotations: { readOnlyHint: true, untrustedContentHint: true },
       execute: (input) =>
-        safeToolResult(() =>
-          workspaceService.query({
-            type: 'search-locations',
-            query: z.string().min(2).parse(input.query),
-          }),
+        runAgentAction('Searching locations', () =>
+          safeToolResult(() =>
+            workspaceService.query({
+              type: 'search-locations',
+              query: z.string().min(2).parse(input.query),
+            }),
+          ),
         ),
     });
-    register('set-office', {
-      name: 'groundwork_set_office',
-      title: 'Set office',
-      description: `Set the office marker after resolving an unambiguous ${city.name} location.`,
+    register('add_destination', {
+      name: 'add_destination',
+      title: 'Add destination',
+      description: `Add one resolved ${city.name} destination. A workspace supports up to 4 destinations.`,
       inputSchema: objectSchema(
         { label: { type: 'string' }, longitude: { type: 'number' }, latitude: { type: 'number' } },
         ['label', 'longitude', 'latitude'],
       ),
       execute: (input, signal) =>
-        safeToolResult(() =>
-          workspaceService.execute(
-            {
-              type: 'set-office',
-              actor: 'agent',
-              office: {
-                label: z.string().min(1).parse(input.label),
-                coordinates: CoordinateSchema.parse([input.longitude, input.latitude]),
+        runAgentAction('Adding a destination', () =>
+          safeToolResult(() =>
+            workspaceService.execute(
+              {
+                type: 'add-destination',
+                actor: 'agent',
+                destination: {
+                  label: z.string().min(1).parse(input.label),
+                  coordinates: CoordinateSchema.parse([input.longitude, input.latitude]),
+                },
               },
-            },
-            signal,
+              signal,
+            ),
           ),
         ),
     });
-    register('add-bike', {
-      name: 'groundwork_add_bike_condition',
-      title: 'Add bicycle condition',
-      description: 'Create a deterministic bicycle travel area from the current office.',
-      inputSchema: objectSchema({ maxMinutes: bikeMinutesProperty }, ['maxMinutes']),
-      execute: (input, signal) =>
-        safeToolResult(() =>
-          workspaceService.execute(
-            {
-              type: 'add-bike',
-              maxMinutes: z.number().min(5).max(90).parse(input.maxMinutes),
-              actor: 'agent',
-            },
-            signal,
-          ),
-        ),
-    });
-    register('add-access', {
-      name: 'groundwork_add_access_condition',
-      title: 'Add nearby-place condition',
-      description: `Create a pedestrian-network walking area from real OSM groceries or parks in ${city.name}.`,
-      inputSchema: objectSchema(
-        {
-          category: { type: 'string', enum: ['grocery', 'park'] },
-          maxMinutes: accessMinutesProperty,
-          groceryType: { type: 'string', enum: ['supermarket', 'supermarket_or_grocery'] },
-        },
-        ['category', 'maxMinutes'],
-      ),
-      execute: (input, signal) =>
-        safeToolResult(() =>
-          workspaceService.execute(
-            {
-              type: 'add-access',
-              actor: 'agent',
-              category: z.enum(['grocery', 'park']).parse(input.category),
-              maxMinutes: z.number().min(1).max(45).parse(input.maxMinutes),
-              groceryType: input.groceryType
-                ? z.enum(['supermarket', 'supermarket_or_grocery']).parse(input.groceryType)
-                : undefined,
-            },
-            signal,
-          ),
-        ),
-    });
-    register('start-draw', {
-      name: 'groundwork_start_preference_draw',
-      title: 'Ask the user to draw',
-      description:
-        'Put the live map into polygon drawing mode and wait for the user to draw the area they would consider.',
-      execute: async (_input, signal) => {
-        return safeToolResult(async () => {
-          const geometry = await requestPreferenceDraw(signal);
-          const result = await workspaceService.execute(
-            { type: 'add-preference', geometry, actor: 'agent' },
-            signal,
-          );
-          return result.ok ? { ...result, data: { geometryType: geometry.geometry.type } } : result;
-        });
-      },
-    });
-    register('update-condition', {
-      name: 'groundwork_update_condition',
-      title: 'Update condition',
-      description:
-        'Update the one-way time limit for an existing bicycle, grocery, or park condition.',
-      inputSchema: objectSchema({ id: { type: 'string' }, maxMinutes: updateMinutesProperty }, [
-        'id',
-        'maxMinutes',
-      ]),
-      execute: (input, signal) =>
-        safeToolResult(() =>
-          workspaceService.execute(
-            {
-              type: 'update-condition',
-              actor: 'agent',
-              id: z.string().min(1).parse(input.id),
-              maxMinutes: z.number().min(1).max(90).parse(input.maxMinutes),
-            },
-            signal,
-          ),
-        ),
-    });
-    register('delete-condition', {
-      name: 'groundwork_delete_condition',
-      title: 'Delete condition',
-      description: 'Delete one condition from the analysis by ID.',
+    register('remove_destination', {
+      name: 'remove_destination',
+      title: 'Remove destination',
+      description: 'Remove a destination by ID, along with travel conditions that reference it.',
       inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
       execute: (input, signal) =>
-        safeToolResult(() =>
-          workspaceService.execute(
-            {
-              type: 'delete-condition',
-              id: z.string().min(1).parse(input.id),
-              actor: 'agent',
-            },
-            signal,
+        runAgentAction('Removing a destination', () =>
+          safeToolResult(() =>
+            workspaceService.execute(
+              { type: 'remove-destination', id: z.string().min(1).parse(input.id), actor: 'agent' },
+              signal,
+            ),
           ),
         ),
     });
-    register('set-visibility', {
-      name: 'groundwork_set_layer_visibility',
+    register('add_travel_condition', {
+      name: 'add_travel_condition',
+      title: 'Add travel condition',
+      description: `Add a one-way network travel condition to one destination. mode must be ${TRAVEL_MODES.join(', ')}; maxMinutes must be 5–90. Car times are free-flow estimates without live traffic.`,
+      inputSchema: objectSchema(
+        {
+          destinationId: { type: 'string' },
+          mode: { type: 'string', enum: [...TRAVEL_MODES] },
+          maxMinutes: travelMinutesProperty,
+        },
+        ['destinationId', 'mode', 'maxMinutes'],
+      ),
+      execute: (input, signal) =>
+        runAgentAction('Adding a travel priority', () =>
+          safeToolResult(() =>
+            workspaceService.execute(
+              {
+                type: 'add-travel',
+                actor: 'agent',
+                destinationId: z.string().min(1).parse(input.destinationId),
+                mode: z.enum(TRAVEL_MODES).parse(input.mode),
+                maxMinutes: z.number().min(5).max(90).parse(input.maxMinutes),
+              },
+              signal,
+            ),
+          ),
+        ),
+    });
+    register('add_place_condition', {
+      name: 'add_place_condition',
+      title: 'Add place condition',
+      description: `Add network access to real OSM places in ${city.name}. category must be ${PLACE_CATEGORIES.join(', ')}; mode must be ${ACCESS_MODES.join(', ')}; maxMinutes must be 1–45. groceryType may be supermarket or supermarket_or_grocery.`,
+      inputSchema: objectSchema(
+        {
+          category: { type: 'string', enum: [...PLACE_CATEGORIES] },
+          mode: { type: 'string', enum: [...ACCESS_MODES] },
+          maxMinutes: placeMinutesProperty,
+          groceryType: { type: 'string', enum: ['supermarket', 'supermarket_or_grocery'] },
+        },
+        ['category', 'mode', 'maxMinutes'],
+      ),
+      execute: (input, signal) =>
+        runAgentAction('Adding a place priority', () =>
+          safeToolResult(() =>
+            workspaceService.execute(
+              {
+                type: 'add-place',
+                actor: 'agent',
+                category: z.enum(PLACE_CATEGORIES).parse(input.category),
+                mode: z.enum(ACCESS_MODES).parse(input.mode),
+                maxMinutes: z.number().min(1).max(45).parse(input.maxMinutes),
+                groceryType: input.groceryType
+                  ? z.enum(['supermarket', 'supermarket_or_grocery']).parse(input.groceryType)
+                  : undefined,
+              },
+              signal,
+            ),
+          ),
+        ),
+    });
+    register('request_user_drawing', {
+      name: 'request_user_drawing',
+      title: 'Ask the user to draw',
+      description:
+        'Put the shared map into polygon mode and wait until the user finishes drawing an area they would consider.',
+      execute: (_input, signal) =>
+        runAgentAction('Waiting for you to draw', () =>
+          safeToolResult(async () => {
+            const geometry = await requestPreferenceDraw(signal);
+            const result = await workspaceService.execute(
+              { type: 'add-preference', geometry, actor: 'agent' },
+              signal,
+            );
+            return result.ok
+              ? { ...result, data: { geometryType: geometry.geometry.type } }
+              : result;
+          }),
+        ),
+    });
+    register('update_condition', {
+      name: 'update_condition',
+      title: 'Update condition',
+      description: `Update any editable fields on a condition by ID. Travel modes: ${TRAVEL_MODES.join(', ')} with 5–90 minutes. Place categories: ${PLACE_CATEGORIES.join(', ')} using walk or bike with 1–45 minutes.`,
+      inputSchema: objectSchema(
+        {
+          id: { type: 'string' },
+          maxMinutes: updateMinutesProperty,
+          destinationId: { type: 'string' },
+          mode: { type: 'string', enum: [...TRAVEL_MODES] },
+          category: { type: 'string', enum: [...PLACE_CATEGORIES] },
+          groceryType: { type: 'string', enum: ['supermarket', 'supermarket_or_grocery'] },
+        },
+        ['id'],
+      ),
+      execute: (input, signal) =>
+        runAgentAction('Updating a priority', () =>
+          safeToolResult(() => {
+            const parsed = UpdateInputSchema.parse(input);
+            return workspaceService.execute(
+              { type: 'update-condition', ...parsed, actor: 'agent' },
+              signal,
+            );
+          }),
+        ),
+    });
+    register('delete_condition', {
+      name: 'delete_condition',
+      title: 'Delete condition',
+      description: 'Delete one condition by ID. Up to 20 conditions may exist in a workspace.',
+      inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
+      execute: (input, signal) =>
+        runAgentAction('Deleting a priority', () =>
+          safeToolResult(() =>
+            workspaceService.execute(
+              { type: 'delete-condition', id: z.string().min(1).parse(input.id), actor: 'agent' },
+              signal,
+            ),
+          ),
+        ),
+    });
+    register('set_layer_visibility', {
+      name: 'set_layer_visibility',
       title: 'Show or hide layer',
-      description: 'Show or hide a condition layer without changing the calculation.',
+      description: 'Show or hide a condition layer without changing its calculation.',
       inputSchema: objectSchema({ id: { type: 'string' }, visible: { type: 'boolean' } }, [
         'id',
         'visible',
       ]),
       execute: (input, signal) =>
-        safeToolResult(() =>
-          workspaceService.execute(
-            {
-              type: 'set-visibility',
-              actor: 'agent',
-              id: z.string().min(1).parse(input.id),
-              visible: z.boolean().parse(input.visible),
-            },
-            signal,
+        runAgentAction('Changing layer visibility', () =>
+          safeToolResult(() =>
+            workspaceService.execute(
+              {
+                type: 'set-visibility',
+                actor: 'agent',
+                id: z.string().min(1).parse(input.id),
+                visible: z.boolean().parse(input.visible),
+              },
+              signal,
+            ),
           ),
         ),
     });
-    register('combine', {
-      name: 'groundwork_combine_conditions',
+    register('combine_conditions', {
+      name: 'combine_conditions',
       title: 'Combine conditions',
-      description: 'Intersect all current conditions to create the feasible region.',
+      description:
+        'Intersect all current conditions. At least 2 and no more than 20 are supported.',
       execute: (_input, signal) =>
-        workspaceService.execute({ type: 'combine', actor: 'agent' }, signal),
+        runAgentAction('Combining priorities', () =>
+          workspaceService.execute({ type: 'combine', actor: 'agent' }, signal),
+        ),
     });
     register('recalculate', {
-      name: 'groundwork_recalculate',
+      name: 'recalculate',
       title: 'Recalculate analysis',
-      description:
-        'Refresh stale network-dependent results after the office or bicycle limit changes.',
+      description: 'Refresh stale network results after a destination or travel condition changes.',
       execute: (_input, signal) =>
-        workspaceService.execute({ type: 'recalculate', actor: 'agent' }, signal),
+        runAgentAction('Updating matching areas', () =>
+          workspaceService.execute({ type: 'recalculate', actor: 'agent' }, signal),
+        ),
     });
-    register('rank', {
-      name: 'groundwork_rank_candidates',
-      title: 'Rank candidates',
-      description: 'Rank three balanced candidate areas inside the fresh feasible region.',
+    register('rank_areas', {
+      name: 'rank_areas',
+      title: 'Rank areas',
+      description: 'Rank the 3 strongest balanced areas inside the fresh feasible region.',
       execute: (_input, signal) =>
-        workspaceService.execute({ type: 'rank', actor: 'agent' }, signal),
+        runAgentAction('Ranking areas', () =>
+          workspaceService.execute({ type: 'rank', actor: 'agent' }, signal),
+        ),
     });
-    register('analyze-restriction', {
-      name: 'groundwork_analyze_restriction',
+    register('analyze_restriction', {
+      name: 'analyze_restriction',
       title: 'Analyze strongest restriction',
-      description:
-        'Read the calculated condition that removes the largest otherwise-feasible area.',
+      description: 'Read the condition that removes the largest otherwise-feasible area.',
       annotations: { readOnlyHint: true },
-      execute: () => workspaceService.query({ type: 'analyze-restriction' }),
+      execute: () =>
+        runAgentAction('Analyzing restrictions', () =>
+          workspaceService.query({ type: 'analyze-restriction' }),
+        ),
     });
-    register('select-candidate', {
-      name: 'groundwork_select_candidate',
-      title: 'Select candidate',
-      description: 'Select a ranked candidate by ID.',
+    register('select_area', {
+      name: 'select_area',
+      title: 'Select area',
+      description: 'Select one ranked area by ID.',
       inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
       execute: (input, signal) =>
-        safeToolResult(() =>
-          workspaceService.execute(
-            {
-              type: 'select-candidate',
-              id: z.string().min(1).parse(input.id),
-              actor: 'agent',
-            },
-            signal,
+        runAgentAction('Selecting an area', () =>
+          safeToolResult(() =>
+            workspaceService.execute(
+              { type: 'select-candidate', id: z.string().min(1).parse(input.id), actor: 'agent' },
+              signal,
+            ),
           ),
         ),
     });
-    register('explain-candidate', {
-      name: 'groundwork_explain_candidate',
-      title: 'Explain candidate',
-      description: 'Read calculated metrics and trade-offs for a candidate.',
+    register('explain_area', {
+      name: 'explain_area',
+      title: 'Explain area',
+      description: 'Read every calculated condition metric and trade-off for one ranked area.',
       inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
       annotations: { readOnlyHint: true },
       execute: (input) =>
-        safeToolResult(() =>
-          workspaceService.query({
-            type: 'explain-candidate',
-            id: z.string().min(1).parse(input.id),
-          }),
+        runAgentAction('Explaining an area', () =>
+          safeToolResult(() =>
+            workspaceService.query({
+              type: 'explain-area',
+              id: z.string().min(1).parse(input.id),
+            }),
+          ),
         ),
     });
-    register('remove-candidate', {
-      name: 'groundwork_remove_candidate',
-      title: 'Remove candidate',
-      description: 'Remove a candidate and fill its place with the next-ranked area.',
+    register('remove_area', {
+      name: 'remove_area',
+      title: 'Remove area',
+      description: 'Remove one ranked area and fill its place with the next strongest option.',
       inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
       execute: (input, signal) =>
-        safeToolResult(() =>
-          workspaceService.execute(
-            {
-              type: 'remove-candidate',
-              id: z.string().min(1).parse(input.id),
-              actor: 'agent',
-            },
-            signal,
+        runAgentAction('Removing an area', () =>
+          safeToolResult(() =>
+            workspaceService.execute(
+              { type: 'remove-candidate', id: z.string().min(1).parse(input.id), actor: 'agent' },
+              signal,
+            ),
           ),
         ),
     });
     register('undo', {
-      name: 'groundwork_undo',
+      name: 'undo',
       title: 'Undo last change',
       description: 'Undo the single most recent meaningful workspace change.',
       execute: (_input, signal) =>
-        workspaceService.execute({ type: 'undo', actor: 'agent' }, signal),
+        runAgentAction('Undoing the last change', () =>
+          workspaceService.execute({ type: 'undo', actor: 'agent' }, signal),
+        ),
     });
-    register('create-share-link', {
-      name: 'groundwork_create_share_link',
+    register('create_share_link', {
+      name: 'create_share_link',
       title: 'Create share link',
-      description: 'Return a URL containing the current workspace. Does not copy or navigate.',
+      description: 'Return a URL containing the current workspace. This does not copy or navigate.',
       annotations: { readOnlyHint: true },
-      execute: () => workspaceService.query({ type: 'create-share-link' }),
+      execute: () =>
+        runAgentAction('Creating a share link', () =>
+          workspaceService.query({ type: 'create-share-link' }),
+        ),
     });
 
-    // Removing the registration that started a long-running command aborts that same invocation.
-    // Keep the current tool surface stable until calculation/drawing finishes, then reconcile it.
     if (operation !== 'calculating' && operation !== 'drawing') {
       for (const [capability, controller] of registrations.current) {
         if (!capabilities.has(capability)) {

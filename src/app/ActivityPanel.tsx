@@ -5,7 +5,6 @@ import { getWebMcpStatusLabel } from '../webmcp/runtime';
 
 export function ActivityPanel() {
   const [shareMessage, setShareMessage] = useState('');
-  const [confirmingReset, setConfirmingReset] = useState(false);
   const state = useWorkspaceStore();
 
   const share = async () => {
@@ -56,8 +55,17 @@ export function ActivityPanel() {
             .toReversed()
             .slice(0, 8)
             .map((entry) => (
-              <li key={entry.id}>
-                <span>{entry.message}</span>
+              <li key={entry.id} className={`actor-${entry.actor}`}>
+                <span>
+                  <small>
+                    {entry.actor === 'agent'
+                      ? 'Agent'
+                      : entry.actor === 'user'
+                        ? 'You'
+                        : 'SweetSpot'}
+                  </small>
+                  {entry.message}
+                </span>
                 <time dateTime={new Date(entry.timestamp).toISOString()}>
                   {new Date(entry.timestamp).toLocaleTimeString([], {
                     hour: '2-digit',
@@ -70,26 +78,6 @@ export function ActivityPanel() {
       ) : (
         <p className="empty-activity">Your changes will appear here.</p>
       )}
-
-      <div className="reset-area">
-        <button
-          type="button"
-          className="text-button danger-text"
-          onClick={() => {
-            if (!confirmingReset) return setConfirmingReset(true);
-            setConfirmingReset(false);
-            void workspaceService.execute({ type: 'reset' });
-          }}
-          disabled={state.operation === 'calculating'}
-        >
-          {confirmingReset ? 'Confirm start over' : 'Start over'}
-        </button>
-        {confirmingReset ? (
-          <button type="button" className="text-button" onClick={() => setConfirmingReset(false)}>
-            Cancel
-          </button>
-        ) : null}
-      </div>
 
       <p className="workspace-footnote">
         {document.modelContext

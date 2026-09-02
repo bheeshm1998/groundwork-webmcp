@@ -26,7 +26,7 @@ export function ResultsPanel() {
           <p className="step-label">3 · Results</p>
           <h2 id="results-heading">Results need updating</h2>
           <p>
-            Your destination or bicycle limit changed. Update the matching areas before relying on
+            A destination or travel priority changed. Update the matching areas before relying on
             this plan.
           </p>
           <button
@@ -78,18 +78,15 @@ export function ResultsPanel() {
               </button>
 
               <dl className="candidate-metrics">
-                <div>
-                  <dt>Bike</dt>
-                  <dd>{minutes(candidate.bikeMinutes)}</dd>
-                </div>
-                <div>
-                  <dt>Groceries</dt>
-                  <dd>{minutes(candidate.groceryMinutes)}</dd>
-                </div>
-                <div>
-                  <dt>Park</dt>
-                  <dd>{minutes(candidate.parkMinutes)}</dd>
-                </div>
+                {candidate.metrics.map((metric) => (
+                  <div key={metric.conditionId}>
+                    <dt>{metric.label}</dt>
+                    <dd>
+                      {minutes(metric.minutes)}
+                      {metric.nearestPlaceName ? <small>{metric.nearestPlaceName}</small> : null}
+                    </dd>
+                  </div>
+                ))}
               </dl>
 
               <details className="candidate-details">
@@ -133,8 +130,9 @@ export function ResultsPanel() {
         <details className="method-panel">
           <summary>About these estimates</summary>
           <p>
-            Times are modeled from OpenStreetMap streets. They do not include live traffic, hills,
-            closures, opening hours, or housing availability.
+            Times are modeled from OpenStreetMap streets. Driving uses free-flow speeds by road
+            class and does not include live traffic. Estimates also omit hills, closures, opening
+            hours, and housing availability.
           </p>
         </details>
       ) : null}

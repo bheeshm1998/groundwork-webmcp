@@ -10,6 +10,7 @@ import { WebMCPBridge } from '../webmcp/WebMCPBridge';
 import { cancelPreferenceDraw } from '../map/drawing';
 import { cityFromLocation } from '../domain/cities';
 import { getWebMcpRuntime, getWebMcpStatusLabel } from '../webmcp/runtime';
+import { getCapabilities } from '../domain/capabilities';
 
 const MapView = lazy(() =>
   import('../map/MapView').then((module) => ({ default: module.MapView })),
@@ -22,17 +23,39 @@ function WorkspaceApp() {
   const operation = useWorkspaceStore((state) => state.operation);
   const error = useWorkspaceStore((state) => state.error);
   const metadata = useWorkspaceStore((state) => state.datasetMetadata);
-  const office = useWorkspaceStore((state) => state.canonical.office);
-  const conditionCount = useWorkspaceStore((state) => state.canonical.conditions.length);
+  const canonical = useWorkspaceStore((state) => state.canonical);
+  const derived = useWorkspaceStore((state) => state.derived);
+  const freshness = useWorkspaceStore((state) => state.analysisFreshness);
+  const undo = useWorkspaceStore((state) => state.undo);
+  const drawingReady = useWorkspaceStore((state) => state.drawingReady);
+  const activeAgentAction = useWorkspaceStore((state) => state.activeAgentAction);
+  const latestActivity = useWorkspaceStore((state) => state.activity.at(-1));
+  const conditionCount = canonical.conditions.length;
+  const destinationCount = canonical.destinations.length;
   const hasResults = useWorkspaceStore((state) => state.canonical.combined);
   const [showActivity, setShowActivity] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
   const topbarRef = useRef<HTMLElement>(null);
   const workspaceGridRef = useRef<HTMLDivElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
   const workspaceButtonRef = useRef<HTMLButtonElement>(null);
 
-  const currentStep = hasResults ? 3 : office && conditionCount >= 2 ? 2 : office ? 2 : 1;
+  const currentStep = hasResults ? 3 : destinationCount > 0 || conditionCount > 0 ? 2 : 1;
+  const capabilities = getCapabilities(
+    canonical,
+    derived,
+    freshness,
+    Boolean(undo),
+    operation,
+    drawingReady,
+  );
+  const updateReason =
+    freshness === 'stale'
+      ? 'Update the matching areas now'
+      : canonical.combined
+        ? 'Matching areas are already up to date'
+        : 'Find matching areas before updating';
 
   useEffect(() => {
     const initializeWorkspace = () => {
@@ -97,7 +120,7 @@ function WorkspaceApp() {
           <span>SweetSpot</span>
         </a>
         <nav className="workflow-steps" aria-label="Planning progress">
-          {['Destination', 'Priorities', 'Results'].map((label, index) => {
+          {['Destinations', 'Priorities', 'Results'].map((label, index) => {
             const step = index + 1;
             return (
               <span
@@ -112,6 +135,30 @@ function WorkspaceApp() {
           })}
         </nav>
         <div className="topbar-actions">
+          <button
+            type="button"
+            className={`toolbar-button ${freshness === 'stale' ? 'needs-update' : ''}`}
+            disabled={freshness !== 'stale' || operation !== 'idle'}
+            title={updateReason}
+            onClick={() => void workspaceService.execute({ type: 'recalculate', actor: 'user' })}
+          >
+            Update matching areas
+          </button>
+          <button
+            type="button"
+            className={`toolbar-button ${confirmingReset ? 'confirm-reset' : ''}`}
+            disabled={operation === 'calculating'}
+            onClick={() => {
+              if (!confirmingReset) {
+                setConfirmingReset(true);
+                return;
+              }
+              setConfirmingReset(false);
+              void workspaceService.execute({ type: 'reset', actor: 'user' });
+            }}
+          >
+            {confirmingReset ? 'Confirm reset' : 'Reset'}
+          </button>
           <button
             ref={workspaceButtonRef}
             type="button"
@@ -130,10 +177,29 @@ function WorkspaceApp() {
           />
         </div>
       </header>
+      <section className="workspace-pulse" aria-label="Live workspace activity">
+        <span className="capability-count">{capabilities.size} agent actions available</span>
+        {activeAgentAction ? (
+          <span className="live-agent-action" role="status">
+            <i aria-hidden="true" /> Agent · {activeAgentAction}
+          </span>
+        ) : latestActivity ? (
+          <span className={`latest-activity actor-${latestActivity.actor}`}>
+            {latestActivity.actor === 'agent'
+              ? 'Agent'
+              : latestActivity.actor === 'user'
+                ? 'You'
+                : 'SweetSpot'}{' '}
+            · {latestActivity.message}
+          </span>
+        ) : (
+          <span className="latest-activity">Ready for you and your browser assistant.</span>
+        )}
+      </section>
       <div ref={workspaceGridRef} className={`workspace-grid ${hasResults ? 'has-results' : ''}`}>
         <aside className="planner-sidebar" aria-label="Plan setup">
           <OnboardingPanel />
-          {office ? <ConditionsPanel /> : null}
+          <ConditionsPanel />
         </aside>
         <section className="map-region">
           {initialized ? (
@@ -161,7 +227,11 @@ function WorkspaceApp() {
           ) : null}
           {operation === 'drawing' ? (
             <div className="drawing-pill" role="status">
-              <span>Draw your preferred area. Double-click to finish.</span>
+              <span>
+                {activeAgentAction
+                  ? 'The agent is waiting for you. Draw an area and double-click to finish.'
+                  : 'Draw your preferred area. Double-click to finish.'}
+              </span>
               <button type="button" onClick={() => cancelPreferenceDraw()}>
                 Cancel
               </button>

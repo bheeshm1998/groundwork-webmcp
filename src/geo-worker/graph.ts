@@ -1,4 +1,4 @@
-import type { Coordinate } from '../domain/schemas';
+import type { Coordinate, TravelMode } from '../domain/schemas';
 
 export interface CompactGraphSpec {
   format: 'compact-grid-v1';
@@ -19,6 +19,7 @@ export interface GraphData {
   targets: Uint32Array;
   bikeWeights: Float32Array;
   walkWeights: Float32Array;
+  carWeights: Float32Array;
 }
 
 export interface SerializedAdjacencyGraph {
@@ -115,6 +116,7 @@ export function expandCompactGraph(spec: CompactGraphSpec): GraphData {
     targets,
     bikeWeights: weights,
     walkWeights: Float32Array.from(weights, (weight) => weight * (spec.bikeSpeedKph / 4.8)),
+    carWeights: Float32Array.from(weights, (weight) => weight * (spec.bikeSpeedKph / 30)),
   };
 }
 
@@ -127,16 +129,17 @@ export function loadGraph(spec: SerializedGraph): GraphData {
     targets: Uint32Array.from(spec.targets),
     bikeWeights: Float32Array.from(spec.weights),
     walkWeights: Float32Array.from(spec.weights),
+    carWeights: Float32Array.from(spec.weights),
   };
 }
 
 export function decodeGraphBinary(bytes: Uint8Array): GraphData {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const magic = new TextDecoder().decode(bytes.subarray(0, 4));
-  if (magic !== 'GWG2') throw new Error('Unsupported SweetSpot graph binary.');
+  if (magic !== 'GWG3') throw new Error('Unsupported SweetSpot graph binary.');
   const nodeCount = view.getUint32(4, true);
   const edgeCount = view.getUint32(8, true);
-  const expectedBytes = 12 + nodeCount * 8 + (nodeCount + 1) * 4 + edgeCount * 8;
+  const expectedBytes = 12 + nodeCount * 8 + (nodeCount + 1) * 4 + edgeCount * 10;
   if (bytes.byteLength !== expectedBytes)
     throw new Error('The SweetSpot graph binary is truncated.');
   const lng = new Float64Array(nodeCount);
@@ -161,6 +164,7 @@ export function decodeGraphBinary(bytes: Uint8Array): GraphData {
     value === 65_535 ? Number.POSITIVE_INFINITY : value / 100;
   const bikeWeights = new Float32Array(edgeCount);
   const walkWeights = new Float32Array(edgeCount);
+  const carWeights = new Float32Array(edgeCount);
   for (let index = 0; index < edgeCount; index += 1) {
     bikeWeights[index] = decodeWeight(view.getUint16(cursor, true));
     cursor += 2;
@@ -169,7 +173,11 @@ export function decodeGraphBinary(bytes: Uint8Array): GraphData {
     walkWeights[index] = decodeWeight(view.getUint16(cursor, true));
     cursor += 2;
   }
-  return { lng, lat, offsets, targets, bikeWeights, walkWeights };
+  for (let index = 0; index < edgeCount; index += 1) {
+    carWeights[index] = decodeWeight(view.getUint16(cursor, true));
+    cursor += 2;
+  }
+  return { lng, lat, offsets, targets, bikeWeights, walkWeights, carWeights };
 }
 
 /**
@@ -188,6 +196,7 @@ export function reverseGraph(graph: GraphData): GraphData {
   const targets = new Uint32Array(graph.targets.length);
   const bikeWeights = new Float32Array(graph.bikeWeights.length);
   const walkWeights = new Float32Array(graph.walkWeights.length);
+  const carWeights = new Float32Array(graph.carWeights.length);
   const cursors = offsets.slice(0, nodeCount);
   for (let source = 0; source < nodeCount; source += 1) {
     for (let edge = graph.offsets[source]!; edge < graph.offsets[source + 1]!; edge += 1) {
@@ -197,10 +206,27 @@ export function reverseGraph(graph: GraphData): GraphData {
       targets[reversedEdge] = source;
       bikeWeights[reversedEdge] = graph.bikeWeights[edge]!;
       walkWeights[reversedEdge] = graph.walkWeights[edge]!;
+      carWeights[reversedEdge] = graph.carWeights[edge]!;
     }
   }
 
-  return { lng: graph.lng, lat: graph.lat, offsets, targets, bikeWeights, walkWeights };
+  return {
+    lng: graph.lng,
+    lat: graph.lat,
+    offsets,
+    targets,
+    bikeWeights,
+    walkWeights,
+    carWeights,
+  };
+}
+
+export function weightsForMode(graph: GraphData, mode: TravelMode): Float32Array {
+  return {
+    bike: graph.bikeWeights,
+    walk: graph.walkWeights,
+    car: graph.carWeights,
+  }[mode];
 }
 
 export function nearestNode(graph: GraphData, coordinate: Coordinate): number {
@@ -217,7 +243,7 @@ export function nearestNodeForMode(
   const lngScale = Math.cos(coordinate[1] * (Math.PI / 180));
   for (let index = 0; index < graph.lng.length; index += 1) {
     if (mode) {
-      const weights = mode === 'bike' ? graph.bikeWeights : graph.walkWeights;
+      const weights = weightsForMode(graph, mode);
       let eligible = false;
       for (let edge = graph.offsets[index]!; edge < graph.offsets[index + 1]!; edge += 1) {
         if (Number.isFinite(weights[edge]!)) {
@@ -278,8 +304,6 @@ class MinHeap {
   }
 }
 
-export type TravelMode = 'bike' | 'walk';
-
 export function multiSourceDijkstra(
   graph: GraphData,
   origins: number[],
@@ -295,7 +319,7 @@ export function multiSourceDijkstra(
     owners[origin] = owner;
     queue.push([0, origin]);
   });
-  const weights = mode === 'bike' ? graph.bikeWeights : graph.walkWeights;
+  const weights = weightsForMode(graph, mode);
 
   while (queue.size > 0) {
     const item = queue.pop();

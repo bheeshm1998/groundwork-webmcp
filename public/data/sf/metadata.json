@@ -1,27 +1,32 @@
 {
-  "datasetVersion": "sf-osm-datasf-2026-09-02-v2",
-  "generatedAt": "2026-09-02T11:43:44.669Z",
+  "datasetVersion": "sf-osm-datasf-2026-09-02-v3",
+  "generatedAt": "2026-09-02T20:02:17.738Z",
   "coverage": "City and County of San Francisco, California",
   "attribution": "© OpenStreetMap contributors",
   "license": "ODbL 1.0 (OSM); PDDL 1.0 (DataSF)",
-  "graphFormat": "groundwork-graph-v2",
-  "method": "Contracted street graph with destination-oriented directed bicycle times, pedestrian-network times, and sampled park perimeter access.",
+  "graphFormat": "sweetspot-graph-v3",
+  "method": "Contracted street graph with destination-oriented bicycle, pedestrian, and free-flow driving times, plus sampled perimeter access for mapped areas.",
   "assets": {
-    "graph": "graph-sf-osm-datasf-2026-09-02-v2.bin.gz",
-    "places": "places-sf-osm-datasf-2026-09-02-v2.json",
-    "neighborhoods": "neighborhoods-sf-osm-datasf-2026-09-02-v2.geojson",
-    "boundary": "boundary-sf-osm-datasf-2026-09-02-v2.geojson",
-    "nodeLabels": "node-labels-sf-osm-datasf-2026-09-02-v2.json"
+    "graph": "graph-sf-osm-datasf-2026-09-02-v3.bin.gz",
+    "places": "places-sf-osm-datasf-2026-09-02-v3.json",
+    "neighborhoods": "neighborhoods-sf-osm-datasf-2026-09-02-v3.geojson",
+    "boundary": "boundary-sf-osm-datasf-2026-09-02-v3.geojson",
+    "nodeLabels": "node-labels-sf-osm-datasf-2026-09-02-v3.json"
   },
   "counts": {
-    "graphNodes": 69008,
-    "directedEdges": 218899,
-    "groceries": 473,
-    "parks": 304,
-    "searchEntries": 16236,
+    "graphNodes": 69590,
+    "directedEdges": 220419,
+    "places": {
+      "grocery": 473,
+      "school": 285,
+      "healthcare": 155,
+      "park": 304,
+      "cinema": 16
+    },
+    "searchEntries": 16249,
     "neighborhoods": 41
   },
-  "compressedGraphBytes": 1492786,
+  "compressedGraphBytes": 1592122,
   "sources": [
     {
       "name": "OpenStreetMap Overpass San Francisco extract (osmium fallback)",

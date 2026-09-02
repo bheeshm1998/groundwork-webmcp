@@ -1,27 +1,32 @@
 {
-  "datasetVersion": "hyderabad-osm-2026-09-02-v2",
-  "generatedAt": "2026-09-02T12:08:40.437Z",
+  "datasetVersion": "hyderabad-osm-2026-09-02-v3",
+  "generatedAt": "2026-09-02T20:02:35.192Z",
   "coverage": "Hyderabad, Telangana, India",
   "attribution": "© OpenStreetMap contributors",
   "license": "ODbL 1.0 (OSM)",
-  "graphFormat": "groundwork-graph-v2",
-  "method": "Contracted street graph with destination-oriented directed bicycle times, pedestrian-network times, and sampled park perimeter access.",
+  "graphFormat": "sweetspot-graph-v3",
+  "method": "Contracted street graph with destination-oriented bicycle, pedestrian, and free-flow driving times, plus sampled perimeter access for mapped areas.",
   "assets": {
-    "graph": "graph-hyderabad-osm-2026-09-02-v2.bin.gz",
-    "places": "places-hyderabad-osm-2026-09-02-v2.json",
-    "neighborhoods": "neighborhoods-hyderabad-osm-2026-09-02-v2.geojson",
-    "boundary": "boundary-hyderabad-osm-2026-09-02-v2.geojson",
-    "nodeLabels": "node-labels-hyderabad-osm-2026-09-02-v2.json"
+    "graph": "graph-hyderabad-osm-2026-09-02-v3.bin.gz",
+    "places": "places-hyderabad-osm-2026-09-02-v3.json",
+    "neighborhoods": "neighborhoods-hyderabad-osm-2026-09-02-v3.geojson",
+    "boundary": "boundary-hyderabad-osm-2026-09-02-v3.geojson",
+    "nodeLabels": "node-labels-hyderabad-osm-2026-09-02-v3.json"
   },
   "counts": {
-    "graphNodes": 263613,
-    "directedEdges": 699229,
-    "groceries": 447,
-    "parks": 469,
-    "searchEntries": 17336,
+    "graphNodes": 264497,
+    "directedEdges": 702292,
+    "places": {
+      "grocery": 447,
+      "school": 503,
+      "healthcare": 1620,
+      "park": 469,
+      "cinema": 119
+    },
+    "searchEntries": 17361,
     "neighborhoods": 147
   },
-  "compressedGraphBytes": 5411957,
+  "compressedGraphBytes": 6018510,
   "sources": [
     {
       "name": "OpenStreetMap Overpass Hyderabad extract (osmium fallback)",

@@ -1,30 +1,31 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { LocationResult } from '../domain/schemas';
 import { CITIES } from '../domain/cities';
+import { buildStarterPrompts } from '../domain/starter-prompts';
 import { workspaceService } from '../domain/workspace-service';
 import { useWorkspaceStore } from '../store/workspace-store';
 
 export function OnboardingPanel() {
   const [query, setQuery] = useState('');
   const [matches, setMatches] = useState<LocationResult[]>([]);
-  const [loadingSample, setLoadingSample] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
-  const [confirmingSample, setConfirmingSample] = useState(false);
-  const [editingStart, setEditingStart] = useState(false);
-  const office = useWorkspaceStore((state) => state.canonical.office);
-  const conditionCount = useWorkspaceStore((state) => state.canonical.conditions.length);
+  const [promptIndex, setPromptIndex] = useState(0);
+  const [copyMessage, setCopyMessage] = useState('');
+  const destinations = useWorkspaceStore((state) => state.canonical.destinations);
   const operation = useWorkspaceStore((state) => state.operation);
   const cityId = useWorkspaceStore((state) => state.cityId);
   const workspaceEpoch = useWorkspaceStore((state) => state.workspaceEpoch);
   const city = CITIES[cityId];
+  const prompts = useMemo(() => buildStarterPrompts(city), [city]);
+  const mutationsDisabled = operation === 'calculating' || operation === 'drawing';
 
   useEffect(() => {
     setQuery('');
     setMatches([]);
     setSearched(false);
-    setConfirmingSample(false);
-    setEditingStart(false);
+    setPromptIndex(0);
+    setCopyMessage('');
   }, [workspaceEpoch]);
 
   const search = async (event: FormEvent) => {
@@ -41,90 +42,76 @@ export function OnboardingPanel() {
     }
   };
 
-  const loadSample = async () => {
-    if ((office || conditionCount > 0) && !confirmingSample) {
-      setConfirmingSample(true);
-      return;
-    }
-    setConfirmingSample(false);
-    setLoadingSample(true);
+  const copyPrompt = async () => {
     try {
-      const commands = [
-        { type: 'reset' as const },
-        { type: 'set-office' as const, office: city.sampleOffice },
-        { type: 'add-bike' as const, maxMinutes: city.samplePriorities.bikeMinutes },
-        {
-          type: 'add-access' as const,
-          category: 'grocery' as const,
-          maxMinutes: city.samplePriorities.groceryMinutes,
-          groceryType: 'supermarket' as const,
-        },
-        {
-          type: 'add-access' as const,
-          category: 'park' as const,
-          maxMinutes: city.samplePriorities.parkMinutes,
-        },
-        { type: 'combine' as const },
-      ];
-      for (const command of commands) {
-        const result = await workspaceService.execute(command);
-        if (!result.ok) break;
-      }
-    } finally {
-      setLoadingSample(false);
+      await navigator.clipboard.writeText(prompts[promptIndex] ?? '');
+      setCopyMessage('Copied. Paste it into your browser assistant.');
+    } catch {
+      setCopyMessage('Select the text and press Ctrl+C to copy it.');
     }
   };
 
-  if (office && !editingStart) {
-    return (
-      <section className="setup-section destination-summary" aria-labelledby="destination-heading">
-        <div className="setup-heading-row">
-          <div>
-            <p className="step-label">1 · Destination</p>
-            <h1 id="destination-heading">Your regular destination</h1>
-          </div>
-          <span className="step-complete">Set</span>
-        </div>
-        <div className="destination-card">
-          <span className="destination-marker" aria-hidden="true" />
-          <div>
-            <small>Commute to</small>
-            <strong>{office.label}</strong>
-          </div>
-          <button type="button" className="text-button" onClick={() => setEditingStart(true)}>
-            Change
-          </button>
-        </div>
-      </section>
-    );
-  }
-
   return (
     <section className="setup-section destination-setup" aria-labelledby="destination-heading">
-      <p className="step-label">Step 1 of 3</p>
-      <h1 id="destination-heading">Where do you need to go?</h1>
-      <p className="setup-description">Choose your workplace or another regular destination.</p>
-
-      <form className="destination-search" onSubmit={search}>
-        <label htmlFor="office-search">Search {city.name}</label>
-        <div className="search-control">
-          <input
-            id="office-search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Company, address, street, or landmark"
-            minLength={2}
-            autoFocus={!office}
-          />
-          <button
-            type="submit"
-            className="primary-button compact-primary"
-            disabled={searching || query.trim().length < 2}
-          >
-            {searching ? 'Searching…' : 'Search'}
-          </button>
+      <div className="setup-heading-row">
+        <div>
+          <p className="step-label">1 · Destinations</p>
+          <h1 id="destination-heading">Where do you need to go?</h1>
         </div>
-      </form>
+        <span className="priority-count">{destinations.length}/4</span>
+      </div>
+      <p className="setup-description">Add workplaces, schools, or other regular destinations.</p>
+
+      {destinations.length > 0 ? (
+        <ul className="destination-list" aria-label="Current destinations">
+          {destinations.map((destination) => (
+            <li key={destination.id} className="destination-card">
+              <span className="destination-marker" aria-hidden="true" />
+              <div>
+                <small>Travel to</small>
+                <strong>{destination.label}</strong>
+              </div>
+              <button
+                type="button"
+                className="text-button danger-text"
+                disabled={mutationsDisabled}
+                onClick={() =>
+                  void workspaceService.execute({
+                    type: 'remove-destination',
+                    id: destination.id,
+                    actor: 'user',
+                  })
+                }
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {destinations.length < 4 ? (
+        <form className="destination-search" onSubmit={search}>
+          <label htmlFor="destination-search">Search {city.name}</label>
+          <div className="search-control">
+            <input
+              id="destination-search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Company, address, street, or landmark"
+              minLength={2}
+              autoFocus={destinations.length === 0}
+            />
+            <button
+              type="submit"
+              className="primary-button compact-primary"
+              disabled={searching || query.trim().length < 2}
+            >
+              {searching ? 'Searching…' : 'Search'}
+            </button>
+          </div>
+        </form>
+      ) : null}
 
       {matches.length > 0 ? (
         <ul className="search-results" aria-label="Location matches">
@@ -132,15 +119,18 @@ export function OnboardingPanel() {
             <li key={`${match.id}-${match.kind}-${match.coordinates.join(',')}`}>
               <button
                 type="button"
+                disabled={mutationsDisabled}
                 onClick={() => {
                   void (async () => {
                     const result = await workspaceService.execute({
-                      type: 'set-office',
-                      office: { label: match.label, coordinates: match.coordinates },
+                      type: 'add-destination',
+                      actor: 'user',
+                      destination: { label: match.label, coordinates: match.coordinates },
                     });
                     if (result.ok) {
+                      setQuery('');
                       setMatches([]);
-                      setEditingStart(false);
+                      setSearched(false);
                     }
                   })();
                 }}
@@ -165,30 +155,37 @@ export function OnboardingPanel() {
         </p>
       ) : null}
 
-      <div className="sample-option">
-        <span>Not ready to start your own plan?</span>
-        <button
-          type="button"
-          className="text-button"
-          onClick={loadSample}
-          disabled={loadingSample || operation === 'calculating' || operation === 'drawing'}
-          data-testid="load-sample"
-        >
-          {loadingSample
-            ? 'Preparing example…'
-            : confirmingSample
-              ? 'Replace with example'
-              : 'Try an example'}
+      <div className="starter-prompt-panel">
+        <div>
+          <p className="section-kicker">Start with this prompt</p>
+          <p>Copy one into your browser assistant and watch the shared map update.</p>
+        </div>
+        <div className="prompt-variations" aria-label="Prompt variations">
+          {prompts.map((_, index) => (
+            <button
+              key={index}
+              type="button"
+              className={promptIndex === index ? 'prompt-option selected' : 'prompt-option'}
+              aria-pressed={promptIndex === index}
+              onClick={() => {
+                setPromptIndex(index);
+                setCopyMessage('');
+              }}
+            >
+              {index + 1}
+            </button>
+          ))}
+        </div>
+        <textarea
+          readOnly
+          value={prompts[promptIndex]}
+          aria-label={`Starter prompt ${promptIndex + 1}`}
+          onFocus={(event) => event.currentTarget.select()}
+        />
+        <button type="button" className="quiet-button copy-prompt-button" onClick={copyPrompt}>
+          Copy prompt
         </button>
-        {confirmingSample ? (
-          <button
-            type="button"
-            className="text-button muted-text-button"
-            onClick={() => setConfirmingSample(false)}
-          >
-            Cancel
-          </button>
-        ) : null}
+        {copyMessage ? <output className="prompt-copy-status">{copyMessage}</output> : null}
       </div>
     </section>
   );

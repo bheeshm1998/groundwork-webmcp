@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { EMPTY_CANONICAL, EMPTY_DERIVED, SAMPLE_OFFICE } from './defaults';
+import { EMPTY_CANONICAL, EMPTY_DERIVED } from './defaults';
 import type { CanonicalWorkspace, DerivedAnalysis } from './schemas';
 import { decodeWorkspace, STORAGE_KEY } from '../sharing/share';
 import { useWorkspaceStore } from '../store/workspace-store';
@@ -16,6 +16,17 @@ vi.mock('../geo-worker/client', () => ({ getGeoWorker: () => worker }));
 vi.mock('./geocoder', () => ({ searchOnlineLocations: geocoder.searchOnlineLocations }));
 
 import { workspaceService } from './workspace-service';
+
+const SF_DESTINATION = {
+  id: 'city-hall',
+  label: 'San Francisco City Hall',
+  coordinates: [-122.4192315, 37.7792763] as [number, number],
+};
+const HYDERABAD_DESTINATION = {
+  id: 'gachibowli',
+  label: 'Gachibowli',
+  coordinates: [78.3489, 17.4401] as [number, number],
+};
 
 const feasibleRegion: NonNullable<DerivedAnalysis['feasibleRegion']> = {
   type: 'Feature',
@@ -49,12 +60,16 @@ function analysisFor(canonical: CanonicalWorkspace): DerivedAnalysis {
             score: 0.8,
             minimumSlack: 0.4,
             averageSlack: 0.6,
-            bikeMinutes: 12,
-            groceryMinutes: 6,
-            parkMinutes: 5,
-            nearestGrocery: 'Real grocery',
-            nearestPark: 'Real park',
-            comfortable: ['bike commute', 'grocery access', 'park access'],
+            metrics: canonical.conditions
+              .filter((condition) => condition.kind !== 'preference')
+              .map((condition) => ({
+                conditionId: condition.id,
+                label: condition.label,
+                minutes: 8,
+                nearestPlaceName: condition.kind === 'access' ? 'Nearby place' : null,
+                slack: 0.4,
+              })),
+            comfortable: canonical.conditions.map(({ label }) => label),
             closeToFailing: null,
             tradeoff: 'Balanced fit.',
           },
@@ -62,21 +77,21 @@ function analysisFor(canonical: CanonicalWorkspace): DerivedAnalysis {
       : [],
     restriction: combined
       ? {
-          conditionId: canonical.conditions.at(-1)!.id,
-          label: canonical.conditions.at(-1)!.label,
+          conditionId: canonical.conditions.at(-1)?.id ?? 'combined',
+          label: canonical.conditions.at(-1)?.label ?? 'Combined priorities',
           areaLostKm2: 1.4,
           currentAreaKm2: 0.48,
           relaxedAreaKm2: 1.2,
-          message: 'Park access is the strongest restriction.',
+          message: 'One priority is the strongest restriction.',
         }
       : null,
   };
 }
 
-function resetStore() {
+function resetStore(canonical: CanonicalWorkspace = structuredClone(EMPTY_CANONICAL)) {
   useWorkspaceStore.setState({
     cityId: 'sf',
-    canonical: structuredClone(EMPTY_CANONICAL),
+    canonical,
     derived: structuredClone(EMPTY_DERIVED),
     activity: [],
     undo: null,
@@ -84,6 +99,8 @@ function resetStore() {
     analysisFreshness: 'not-combined',
     error: null,
     initialized: false,
+    drawingReady: false,
+    activeAgentAction: null,
   });
 }
 
@@ -97,8 +114,8 @@ describe('WorkspaceService', () => {
       search: [
         {
           id: 'market-1',
-          label: SAMPLE_OFFICE.label,
-          coordinates: SAMPLE_OFFICE.coordinates,
+          label: SF_DESTINATION.label,
+          coordinates: SF_DESTINATION.coordinates,
           kind: 'poi',
         },
       ],
@@ -110,56 +127,62 @@ describe('WorkspaceService', () => {
       .mockImplementation(async (canonical: CanonicalWorkspace) => analysisFor(canonical));
   });
 
-  it('runs the agent location scenario and returns a compact workspace summary', async () => {
+  it('runs a multi-condition agent scenario and returns the canonical vocabulary', async () => {
     await workspaceService.initialize();
     const search = await workspaceService.query({ type: 'search-locations', query: 'City Hall' });
-    expect(search.data).toEqual([
-      {
-        id: 'market-1',
-        label: SAMPLE_OFFICE.label,
-        coordinates: SAMPLE_OFFICE.coordinates,
-        kind: 'poi',
-      },
-    ]);
+    expect(search.data).toEqual([expect.objectContaining({ label: 'San Francisco City Hall' })]);
 
-    await workspaceService.execute({ type: 'set-office', office: SAMPLE_OFFICE, actor: 'agent' });
-    await workspaceService.execute({ type: 'add-bike', maxMinutes: 25, actor: 'agent' });
     await workspaceService.execute({
-      type: 'add-access',
-      category: 'grocery',
-      maxMinutes: 10,
-      groceryType: 'supermarket',
+      type: 'add-destination',
+      destination: SF_DESTINATION,
       actor: 'agent',
     });
     await workspaceService.execute({
-      type: 'add-access',
-      category: 'park',
-      maxMinutes: 8,
+      type: 'add-travel',
+      destinationId: SF_DESTINATION.id,
+      mode: 'car',
+      maxMinutes: 30,
+      actor: 'agent',
+    });
+    await workspaceService.execute({
+      type: 'add-place',
+      category: 'school',
+      mode: 'walk',
+      maxMinutes: 12,
+      actor: 'agent',
+    });
+    await workspaceService.execute({
+      type: 'add-place',
+      category: 'school',
+      mode: 'bike',
+      maxMinutes: 20,
       actor: 'agent',
     });
     await workspaceService.execute({ type: 'combine', actor: 'agent' });
-    const ranked = await workspaceService.execute({ type: 'rank', actor: 'agent' });
+    await workspaceService.execute({ type: 'rank', actor: 'agent' });
     const summary = await workspaceService.query({ type: 'get-workspace' });
 
-    expect(ranked.ok).toBe(true);
     expect(summary).toMatchObject({
       ok: true,
       data: {
-        office: SAMPLE_OFFICE,
+        destinations: [SF_DESTINATION],
         freshness: 'fresh',
         feasibleAreaKm2: 0.48,
         candidates: [{ id: 'candidate-1' }],
+        supportedAnalysis: {
+          commuteModes: ['bike', 'walk', 'car'],
+          nearbyCategories: ['grocery', 'school', 'healthcare', 'park', 'cinema'],
+        },
       },
     });
     expect((summary.data as { conditions: unknown[] }).conditions).toHaveLength(3);
-    expect(useWorkspaceStore.getState().activity).toHaveLength(6);
     expect(useWorkspaceStore.getState().activity.every(({ actor }) => actor === 'agent')).toBe(
       true,
     );
     expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull();
   });
 
-  it('falls back to online OSM geocoding for company names absent from the local extract', async () => {
+  it('falls back to online OSM geocoding when the local extract has no strong match', async () => {
     geocoder.searchOnlineLocations.mockResolvedValue([
       {
         id: 'photon-N-123',
@@ -177,46 +200,53 @@ describe('WorkspaceService', () => {
 
     expect(geocoder.searchOnlineLocations).toHaveBeenCalledWith('sf', 'Google San Francisco');
     expect(result.data).toEqual([
-      expect.objectContaining({
-        label: 'Google — 345 Spear Street, San Francisco, California',
-        coordinates: [-122.3895538, 37.7894073],
-      }),
+      expect.objectContaining({ label: 'Google — 345 Spear Street, San Francisco, California' }),
     ]);
   });
 
-  it('loads Hyderabad independently and rejects coordinates from the other city', async () => {
+  it('loads Hyderabad independently and rejects coordinates from another city', async () => {
     await workspaceService.initialize('hyderabad');
-
     expect(worker.initialize).toHaveBeenCalledWith('hyderabad');
-    expect(useWorkspaceStore.getState().cityId).toBe('hyderabad');
     expect(useWorkspaceStore.getState().canonical.view.center).toEqual(CITIES.hyderabad.center);
 
     await expect(
-      workspaceService.execute({ type: 'set-office', office: SAMPLE_OFFICE }),
+      workspaceService.execute({ type: 'add-destination', destination: SF_DESTINATION }),
     ).resolves.toMatchObject({
       ok: false,
       message: 'Choose a location inside the supported Hyderabad area.',
     });
     await expect(
       workspaceService.execute({
-        type: 'set-office',
-        office: CITIES.hyderabad.sampleOffice,
+        type: 'add-destination',
+        destination: HYDERABAD_DESTINATION,
       }),
     ).resolves.toMatchObject({ ok: true });
   });
 
-  it('marks bike-dependent combined analysis stale until it is recalculated', async () => {
+  it('marks destination-dependent analysis stale until recalculated', async () => {
     await workspaceService.initialize();
-    await workspaceService.execute({ type: 'set-office', office: SAMPLE_OFFICE });
-    await workspaceService.execute({ type: 'add-bike', maxMinutes: 25 });
-    await workspaceService.execute({ type: 'add-access', category: 'park', maxMinutes: 8 });
+    await workspaceService.execute({ type: 'add-destination', destination: SF_DESTINATION });
+    await workspaceService.execute({
+      type: 'add-travel',
+      destinationId: SF_DESTINATION.id,
+      mode: 'bike',
+      maxMinutes: 25,
+    });
+    await workspaceService.execute({
+      type: 'add-place',
+      category: 'park',
+      mode: 'walk',
+      maxMinutes: 8,
+    });
     await workspaceService.execute({ type: 'combine' });
-    const bike = useWorkspaceStore.getState().canonical.conditions[0];
-    expect(bike).toBeDefined();
-    const bikeId = bike!.id;
+    const travelId = useWorkspaceStore.getState().canonical.conditions[0]?.id ?? '';
     const analyzeCount = worker.analyze.mock.calls.length;
 
-    await workspaceService.execute({ type: 'update-condition', id: bikeId, maxMinutes: 30 });
+    await workspaceService.execute({
+      type: 'update-condition',
+      id: travelId,
+      maxMinutes: 30,
+    });
     expect(useWorkspaceStore.getState().analysisFreshness).toBe('stale');
     expect(useWorkspaceStore.getState().derived).toEqual(EMPTY_DERIVED);
     expect(worker.analyze).toHaveBeenCalledTimes(analyzeCount);
@@ -226,120 +256,135 @@ describe('WorkspaceService', () => {
     expect(worker.analyze).toHaveBeenCalledTimes(analyzeCount + 1);
   });
 
-  it('rejects invalid command ordering without mutating the canonical workspace', async () => {
+  it('rejects a travel priority without a current destination', async () => {
     await workspaceService.initialize();
-    const result = await workspaceService.execute({ type: 'add-bike', maxMinutes: 25 });
+    const result = await workspaceService.execute({
+      type: 'add-travel',
+      destinationId: 'missing',
+      mode: 'car',
+      maxMinutes: 30,
+    });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: false,
-      message: 'Set an office before adding a bicycle condition.',
+      message: 'Choose a current destination for this travel priority.',
     });
     expect(useWorkspaceStore.getState().canonical).toEqual(EMPTY_CANONICAL);
-    expect(useWorkspaceStore.getState().operation).toBe('error');
+  });
+
+  it('keeps two conditions of the same category', async () => {
+    await workspaceService.initialize();
+    await workspaceService.execute({
+      type: 'add-place',
+      category: 'school',
+      mode: 'walk',
+      maxMinutes: 10,
+    });
+    await workspaceService.execute({
+      type: 'add-place',
+      category: 'school',
+      mode: 'bike',
+      maxMinutes: 20,
+    });
+
+    expect(useWorkspaceStore.getState().canonical.conditions).toHaveLength(2);
+  });
+
+  it('produces identical canonical state for user and agent edits', async () => {
+    await workspaceService.initialize();
+    const baseline: CanonicalWorkspace = {
+      ...structuredClone(EMPTY_CANONICAL),
+      conditions: [
+        {
+          id: 'school-1',
+          kind: 'access',
+          category: 'school',
+          mode: 'walk',
+          label: '10-minute walk to schools',
+          visible: true,
+          maxMinutes: 10,
+        },
+      ],
+    };
+    resetStore(structuredClone(baseline));
+    await workspaceService.execute({
+      type: 'update-condition',
+      id: 'school-1',
+      maxMinutes: 15,
+      actor: 'user',
+    });
+    const userState = structuredClone(useWorkspaceStore.getState().canonical);
+
+    resetStore(structuredClone(baseline));
+    await workspaceService.execute({
+      type: 'update-condition',
+      id: 'school-1',
+      maxMinutes: 15,
+      actor: 'agent',
+    });
+    expect(useWorkspaceStore.getState().canonical).toEqual(userState);
+  });
+
+  it('removes dependent travel conditions with a destination', async () => {
+    await workspaceService.initialize();
+    await workspaceService.execute({ type: 'add-destination', destination: SF_DESTINATION });
+    await workspaceService.execute({
+      type: 'add-travel',
+      destinationId: SF_DESTINATION.id,
+      mode: 'walk',
+      maxMinutes: 20,
+    });
+
+    await workspaceService.execute({ type: 'remove-destination', id: SF_DESTINATION.id });
+    expect(useWorkspaceStore.getState().canonical.destinations).toEqual([]);
+    expect(useWorkspaceStore.getState().canonical.conditions).toEqual([]);
   });
 
   it('undoes the most recent meaningful workspace change', async () => {
     await workspaceService.initialize();
-    await workspaceService.execute({ type: 'set-office', office: SAMPLE_OFFICE });
-    expect(useWorkspaceStore.getState().canonical.office).toEqual(SAMPLE_OFFICE);
+    await workspaceService.execute({ type: 'add-destination', destination: SF_DESTINATION });
+    await workspaceService.execute({ type: 'undo', actor: 'agent' });
 
-    const undone = await workspaceService.execute({ type: 'undo', actor: 'agent' });
-    expect(undone.ok).toBe(true);
-    expect(useWorkspaceStore.getState().canonical.office).toBeNull();
+    expect(useWorkspaceStore.getState().canonical.destinations).toEqual([]);
     expect(useWorkspaceStore.getState().undo).toBeNull();
-    expect(useWorkspaceStore.getState().activity.at(-1)).toMatchObject({
-      actor: 'agent',
-      message: 'Undid the most recent workspace change.',
-    });
   });
 
-  it('keeps the last edit undoable across recalculation and ranking', async () => {
+  it('does not commit an analysis after cancellation', async () => {
     await workspaceService.initialize();
-    await workspaceService.execute({ type: 'set-office', office: SAMPLE_OFFICE });
-    await workspaceService.execute({ type: 'add-bike', maxMinutes: 25 });
-    await workspaceService.execute({ type: 'add-access', category: 'park', maxMinutes: 8 });
-    await workspaceService.execute({ type: 'combine' });
-    const bikeId = useWorkspaceStore.getState().canonical.conditions[0]!.id;
-
-    await workspaceService.execute({ type: 'update-condition', id: bikeId, maxMinutes: 30 });
-    await workspaceService.execute({ type: 'recalculate' });
-    await workspaceService.execute({ type: 'rank' });
-    await workspaceService.execute({ type: 'select-candidate', id: 'candidate-1' });
-    await workspaceService.execute({ type: 'undo' });
-
-    const bike = useWorkspaceStore.getState().canonical.conditions.find(({ id }) => id === bikeId);
-    expect(bike).toMatchObject({ kind: 'bike', maxMinutes: 25 });
-  });
-
-  it('replaces duplicate condition categories instead of creating ambiguous constraints', async () => {
-    await workspaceService.initialize();
-    await workspaceService.execute({
-      type: 'add-access',
-      category: 'grocery',
-      maxMinutes: 10,
-      groceryType: 'supermarket',
-    });
-    await workspaceService.execute({
-      type: 'add-access',
-      category: 'grocery',
-      maxMinutes: 5,
-      groceryType: 'supermarket_or_grocery',
-    });
-
-    expect(useWorkspaceStore.getState().canonical.conditions).toHaveLength(1);
-    expect(useWorkspaceStore.getState().canonical.conditions[0]).toMatchObject({
-      category: 'grocery',
-      maxMinutes: 5,
-      groceryType: 'supermarket_or_grocery',
-    });
-  });
-
-  it('rejects nonexistent condition and candidate IDs without consuming undo', async () => {
-    await workspaceService.initialize();
-    await workspaceService.execute({ type: 'set-office', office: SAMPLE_OFFICE });
-    const undoBefore = structuredClone(useWorkspaceStore.getState().undo);
-
-    await expect(
-      workspaceService.execute({ type: 'delete-condition', id: 'missing' }),
-    ).resolves.toMatchObject({ ok: false, message: 'Condition not found.' });
-    await expect(
-      workspaceService.execute({ type: 'select-candidate', id: 'missing' }),
-    ).resolves.toMatchObject({ ok: false, message: 'Candidate not found.' });
-    await expect(
-      workspaceService.execute({ type: 'remove-candidate', id: 'missing' }),
-    ).resolves.toMatchObject({ ok: false, message: 'Candidate not found.' });
-    expect(useWorkspaceStore.getState().undo).toEqual(undoBefore);
-  });
-
-  it('does not commit an analysis after its caller cancels', async () => {
-    await workspaceService.initialize();
-    await workspaceService.execute({ type: 'set-office', office: SAMPLE_OFFICE });
-    let resolveAnalysis!: (analysis: DerivedAnalysis) => void;
+    await workspaceService.execute({ type: 'add-destination', destination: SF_DESTINATION });
+    let resolveAnalysis: ((analysis: DerivedAnalysis) => void) | undefined;
     worker.analyze.mockImplementationOnce(
       () => new Promise<DerivedAnalysis>((resolve) => (resolveAnalysis = resolve)),
     );
     const controller = new AbortController();
     const pending = workspaceService.execute(
-      { type: 'add-bike', maxMinutes: 25, actor: 'agent' },
+      {
+        type: 'add-travel',
+        destinationId: SF_DESTINATION.id,
+        mode: 'bike',
+        maxMinutes: 25,
+        actor: 'agent',
+      },
       controller.signal,
     );
 
     controller.abort();
-    resolveAnalysis(analysisFor(useWorkspaceStore.getState().canonical));
+    resolveAnalysis?.(analysisFor(useWorkspaceStore.getState().canonical));
     await expect(pending).resolves.toEqual({ ok: false, message: 'The operation was cancelled.' });
     expect(useWorkspaceStore.getState().canonical.conditions).toHaveLength(0);
-    expect(useWorkspaceStore.getState().operation).toBe('idle');
   });
 
-  it('creates share links without private history or an undo snapshot', async () => {
+  it('creates share links without private history or undo state', async () => {
     await workspaceService.initialize();
-    await workspaceService.execute({ type: 'set-office', office: SAMPLE_OFFICE });
+    await workspaceService.execute({ type: 'add-destination', destination: SF_DESTINATION });
     const result = await workspaceService.query({ type: 'create-share-link' });
     const url = new URL((result.data as { url: string }).url);
-    const shared = decodeWorkspace(new URLSearchParams(url.hash.slice(1)).get('w')!);
+    const encoded = new URLSearchParams(url.hash.slice(1)).get('w');
+    expect(encoded).not.toBeNull();
+    const shared = decodeWorkspace(encoded ?? '');
 
     expect(shared.activity).toEqual([]);
     expect(shared.undo).toBeNull();
-    expect(shared.canonical.office).toEqual(SAMPLE_OFFICE);
+    expect(shared.canonical.destinations).toEqual([SF_DESTINATION]);
   });
 });

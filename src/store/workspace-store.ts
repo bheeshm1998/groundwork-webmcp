@@ -23,6 +23,7 @@ export interface WorkspaceStore {
   error: string | null;
   initialized: boolean;
   drawingReady: boolean;
+  activeAgentAction: string | null;
   workspaceEpoch: number;
   setOperation: (operation: OperationState, error?: string | null) => void;
   commit: (next: Partial<Omit<WorkspaceStore, 'setOperation' | 'commit'>>) => void;
@@ -41,6 +42,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   error: null,
   initialized: false,
   drawingReady: false,
+  activeAgentAction: null,
   workspaceEpoch: 0,
   setOperation: (operation, error = null) => set({ operation, error }),
   commit: (next) => set(next),

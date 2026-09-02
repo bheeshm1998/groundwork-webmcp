@@ -1,13 +1,16 @@
+import { useState } from 'react';
+import { CITIES, DEFAULT_CITY_ID, type CityId } from '../domain/cities';
+
 const outcomes = [
   {
     number: '01',
-    title: 'Set your destination',
-    description: 'Choose the place you need to reach regularly.',
+    title: 'Add your destinations',
+    description: 'Choose up to four places you need to reach regularly.',
   },
   {
     number: '02',
     title: 'Add your priorities',
-    description: 'Pick comfortable times for cycling, groceries, and parks.',
+    description: 'Mix travel modes with a curated set of nearby place categories.',
   },
   {
     number: '03',
@@ -56,47 +59,6 @@ export function HomePage() {
             </a>
           </div>
         </div>
-
-        <div className="hero-preview" aria-label="Example SweetSpot result">
-          <div className="preview-toolbar">
-            <span className="preview-window-label">Your search</span>
-            <span className="preview-status">3 matches</span>
-          </div>
-          <div className="preview-body">
-            <div className="preview-priorities">
-              <span className="preview-pin" />
-              <div>
-                <small>Destination</small>
-                <strong>{city.sampleOffice.label}</strong>
-              </div>
-              <div className="preview-rule" />
-              <div className="preview-priority-row">
-                <span className="condition-swatch bike" />
-                <span>Bike commute</span>
-                <strong>25 min</strong>
-              </div>
-              <div className="preview-priority-row">
-                <span className="condition-swatch grocery" />
-                <span>Groceries</span>
-                <strong>10 min</strong>
-              </div>
-              <div className="preview-priority-row">
-                <span className="condition-swatch park" />
-                <span>Park</span>
-                <strong>8 min</strong>
-              </div>
-            </div>
-            <div className="preview-result">
-              <span className="result-glow result-glow-one" />
-              <span className="result-glow result-glow-two" />
-              <div className="preview-match-card">
-                <small>Best match</small>
-                <strong>{cityId === 'sf' ? 'Civic Center' : 'Ramanthapur'}</strong>
-                <span>All three priorities are within reach</span>
-              </div>
-            </div>
-          </div>
-        </div>
       </section>
 
       <section className="how-it-works" aria-labelledby="how-heading">
@@ -125,5 +87,3 @@ export function HomePage() {
     </main>
   );
 }
-import { useState } from 'react';
-import { CITIES, DEFAULT_CITY_ID, type CityId } from '../domain/cities';

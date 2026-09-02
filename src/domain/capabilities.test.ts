@@ -3,10 +3,11 @@ import { EMPTY_CANONICAL, EMPTY_DERIVED } from './defaults';
 import { getCapabilities } from './capabilities';
 
 describe('capabilities', () => {
-  it('keeps access conditions independent from the office', () => {
+  it('keeps place conditions independent from destinations', () => {
     const capabilities = getCapabilities(EMPTY_CANONICAL, EMPTY_DERIVED, 'not-combined', false);
-    expect(capabilities.has('add-access')).toBe(true);
-    expect(capabilities.has('add-bike')).toBe(false);
+    expect(capabilities.has('add_place_condition')).toBe(true);
+    expect(capabilities.has('add_travel_condition')).toBe(false);
+    expect(capabilities.has('add_destination')).toBe(true);
   });
 
   it('exposes recalculation only for stale analysis', () => {
@@ -26,7 +27,7 @@ describe('capabilities', () => {
       false,
       'error',
     );
-    expect(capabilities.has('set-office')).toBe(true);
-    expect(capabilities.has('add-access')).toBe(true);
+    expect(capabilities.has('add_destination')).toBe(true);
+    expect(capabilities.has('add_place_condition')).toBe(true);
   });
 });

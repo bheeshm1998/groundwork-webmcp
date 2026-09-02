@@ -25,7 +25,7 @@ export function requestPreferenceDraw(signal?: AbortSignal): Promise<AreaGeometr
       cleanup: () => signal?.removeEventListener('abort', onAbort),
     };
     state.commit({ operation: 'drawing', error: null });
-    window.dispatchEvent(new CustomEvent('groundwork:start-draw'));
+    window.dispatchEvent(new CustomEvent('sweetspot:start-draw'));
   });
 }
 
@@ -43,5 +43,5 @@ export function cancelPreferenceDraw(message = 'Drawing was cancelled.'): void {
   pending?.reject(new Error(message));
   pending = undefined;
   useWorkspaceStore.getState().commit({ operation: 'idle' });
-  window.dispatchEvent(new CustomEvent('groundwork:cancel-draw'));
+  window.dispatchEvent(new CustomEvent('sweetspot:cancel-draw'));
 }

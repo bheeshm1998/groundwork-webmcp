@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { CanonicalWorkspaceSchema, OfficeSchema, PolygonFeatureSchema } from './schemas';
+import { CanonicalWorkspaceSchema, DestinationSchema, PolygonFeatureSchema } from './schemas';
 import { EMPTY_CANONICAL } from './defaults';
 
 describe('workspace schemas', () => {
-  it('accepts global office coordinates and rejects invalid longitude/latitude values', () => {
-    expect(OfficeSchema.parse({ label: 'Hyderabad', coordinates: [78.4867, 17.385] })).toEqual({
+  it('accepts global destination coordinates and rejects invalid longitude/latitude values', () => {
+    expect(
+      DestinationSchema.parse({ id: 'hyd', label: 'Hyderabad', coordinates: [78.4867, 17.385] }),
+    ).toEqual({
+      id: 'hyd',
       label: 'Hyderabad',
       coordinates: [78.4867, 17.385],
     });
-    expect(() => OfficeSchema.parse({ label: 'Invalid', coordinates: [181, 91] })).toThrow();
+    expect(() =>
+      DestinationSchema.parse({ id: 'bad', label: 'Invalid', coordinates: [181, 91] }),
+    ).toThrow();
   });
 
-  it('rejects combined workspaces with too few or duplicate condition types', () => {
+  it('rejects combined workspaces with too few conditions and accepts duplicate categories', () => {
     expect(() =>
       CanonicalWorkspaceSchema.parse({
         ...EMPTY_CANONICAL,
@@ -21,6 +26,7 @@ describe('workspace schemas', () => {
             id: 'park',
             kind: 'access',
             category: 'park',
+            mode: 'walk',
             label: 'Park',
             visible: true,
             maxMinutes: 8,
@@ -28,7 +34,7 @@ describe('workspace schemas', () => {
         ],
       }),
     ).toThrow();
-    expect(() =>
+    expect(
       CanonicalWorkspaceSchema.parse({
         ...EMPTY_CANONICAL,
         conditions: [
@@ -36,6 +42,7 @@ describe('workspace schemas', () => {
             id: 'park-1',
             kind: 'access',
             category: 'park',
+            mode: 'walk',
             label: 'Park 1',
             visible: true,
             maxMinutes: 8,
@@ -44,13 +51,14 @@ describe('workspace schemas', () => {
             id: 'park-2',
             kind: 'access',
             category: 'park',
+            mode: 'bike',
             label: 'Park 2',
             visible: true,
             maxMinutes: 10,
           },
         ],
-      }),
-    ).toThrow();
+      }).conditions,
+    ).toHaveLength(2);
   });
 
   it('rejects unclosed and oversized preference geometry', () => {

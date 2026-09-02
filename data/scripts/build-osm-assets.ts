@@ -8,9 +8,12 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import pointOnFeature from '@turf/point-on-feature';
 import simplify from '@turf/simplify';
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from 'geojson';
+import { carDirections, carSpeed, type OsmTags } from './routing';
 
 type Coordinate = [number, number];
-type Tags = Record<string, string>;
+type Tags = OsmTags;
+const CATEGORY_IDS = ['grocery', 'school', 'healthcare', 'park', 'cinema'] as const;
+type CategoryId = (typeof CATEGORY_IDS)[number];
 type OverpassElement = {
   type: 'node' | 'way' | 'relation';
   id: number;
@@ -26,6 +29,8 @@ type RawEdge = {
   b: number;
   bikeAB: number;
   bikeBA: number;
+  carAB: number;
+  carBA: number;
   walk: number;
   names: Set<string>;
 };
@@ -49,7 +54,7 @@ const cityConfigs = {
     name: 'San Francisco',
     bbox: '37.69,-122.53,37.83,-122.34',
     osmiumBbox: '-122.53,37.69,-122.34,37.83',
-    datasetVersion: `sf-osm-datasf-${buildDate}-v2`,
+    datasetVersion: `sf-osm-datasf-${buildDate}-v3`,
     maxGraphBytes: 2 * 1024 * 1024,
     neighborhoodUrl: 'https://data.sfgov.org/resource/j2bu-swwd.geojson?$limit=100',
     boundaryUrl:
@@ -61,7 +66,7 @@ const cityConfigs = {
     name: 'Hyderabad',
     bbox: '17.20,78.29,17.56,78.67',
     osmiumBbox: '78.29,17.20,78.67,17.56',
-    datasetVersion: `hyderabad-osm-${buildDate}-v2`,
+    datasetVersion: `hyderabad-osm-${buildDate}-v3`,
     maxGraphBytes: 8 * 1024 * 1024,
     neighborhoodUrl: null,
     boundaryUrl: null,
@@ -405,9 +410,11 @@ function buildRawNetwork(elements: OverpassElement[]) {
     const geometry = geometryCoordinates(way);
     if (geometry.length < 2) continue;
     const [bikeForward, bikeBackward] = bikeDirections(tags);
+    const [carForward, carBackward] = carDirections(tags);
     const walkable = isWalkable(tags);
-    if (!bikeForward && !bikeBackward && !walkable) continue;
-    const speed = bikeSpeed(tags);
+    if (!bikeForward && !bikeBackward && !carForward && !carBackward && !walkable) continue;
+    const bicycleSpeed = bikeSpeed(tags);
+    const drivingSpeed = carSpeed(tags);
     const name = tags.name?.trim();
     if (name) {
       const sum = streetPoints.get(name) ?? { lng: 0, lat: 0, count: 0 };
@@ -427,27 +434,44 @@ function buildRawNetwork(elements: OverpassElement[]) {
       const a = Math.min(from, to);
       const b = Math.max(from, to);
       const key = `${a}:${b}`;
-      const minutes = (distanceKm(fromCoordinate, toCoordinate) / speed) * 60;
+      const bikeMinutes = (distanceKm(fromCoordinate, toCoordinate) / bicycleSpeed) * 60;
+      const carMinutes = (distanceKm(fromCoordinate, toCoordinate) / drivingSpeed) * 60;
       const walkMinutes = (distanceKm(fromCoordinate, toCoordinate) / 4.8) * 60;
       const followsAB = from === a;
       const bikeAB = followsAB
         ? bikeForward
-          ? minutes
+          ? bikeMinutes
           : Infinity
         : bikeBackward
-          ? minutes
+          ? bikeMinutes
           : Infinity;
       const bikeBA = followsAB
         ? bikeBackward
-          ? minutes
+          ? bikeMinutes
           : Infinity
         : bikeForward
-          ? minutes
+          ? bikeMinutes
+          : Infinity;
+      const carAB = followsAB
+        ? carForward
+          ? carMinutes
+          : Infinity
+        : carBackward
+          ? carMinutes
+          : Infinity;
+      const carBA = followsAB
+        ? carBackward
+          ? carMinutes
+          : Infinity
+        : carForward
+          ? carMinutes
           : Infinity;
       const existing = edgesByPair.get(key);
       if (existing) {
         existing.bikeAB = Math.min(existing.bikeAB, bikeAB);
         existing.bikeBA = Math.min(existing.bikeBA, bikeBA);
+        existing.carAB = Math.min(existing.carAB, carAB);
+        existing.carBA = Math.min(existing.carBA, carBA);
         existing.walk = Math.min(existing.walk, walkable ? walkMinutes : Infinity);
         if (name) existing.names.add(name);
       } else
@@ -456,6 +480,8 @@ function buildRawNetwork(elements: OverpassElement[]) {
           b,
           bikeAB,
           bikeBA,
+          carAB,
+          carBA,
           walk: walkable ? walkMinutes : Infinity,
           names: new Set(name ? [name] : []),
         });
@@ -485,6 +511,8 @@ function contractNetwork(coordinates: Coordinate[], edges: RawEdge[]) {
     to: number;
     bikeForward: number;
     bikeBackward: number;
+    carForward: number;
+    carBackward: number;
     walk: number;
   }> = [];
   const trace = (start: number, firstEdge: number) => {
@@ -492,6 +520,8 @@ function contractNetwork(coordinates: Coordinate[], edges: RawEdge[]) {
     let edgeIndex = firstEdge;
     let bikeForward = 0;
     let bikeBackward = 0;
+    let carForward = 0;
+    let carBackward = 0;
     let walk = 0;
     while (true) {
       if (visited.has(edgeIndex)) return;
@@ -500,16 +530,34 @@ function contractNetwork(coordinates: Coordinate[], edges: RawEdge[]) {
       const towardB = current === edge.a;
       bikeForward += towardB ? edge.bikeAB : edge.bikeBA;
       bikeBackward += towardB ? edge.bikeBA : edge.bikeAB;
+      carForward += towardB ? edge.carAB : edge.carBA;
+      carBackward += towardB ? edge.carBA : edge.carAB;
       walk += edge.walk;
       const next = towardB ? edge.b : edge.a;
       if (retained.has(next)) {
-        paths.push({ from: start, to: next, bikeForward, bikeBackward, walk });
+        paths.push({
+          from: start,
+          to: next,
+          bikeForward,
+          bikeBackward,
+          carForward,
+          carBackward,
+          walk,
+        });
         return;
       }
       const nextEdge = incidence[next]!.find((candidate) => candidate !== edgeIndex);
       if (nextEdge === undefined) {
         retained.add(next);
-        paths.push({ from: start, to: next, bikeForward, bikeBackward, walk });
+        paths.push({
+          from: start,
+          to: next,
+          bikeForward,
+          bikeBackward,
+          carForward,
+          carBackward,
+          walk,
+        });
         return;
       }
       current = next;
@@ -526,28 +574,47 @@ function contractNetwork(coordinates: Coordinate[], edges: RawEdge[]) {
     }
   const retainedNodes = [...retained].sort((a, b) => a - b);
   const compactIndex = new Map(retainedNodes.map((node, index) => [node, index]));
-  const adjacency: Array<Array<{ target: number; bike: number; walk: number }>> = retainedNodes.map(
-    () => [],
-  );
+  const adjacency: Array<Array<{ target: number; bike: number; walk: number; car: number }>> =
+    retainedNodes.map(() => []);
   for (const path of paths) {
     const from = compactIndex.get(path.from);
     const to = compactIndex.get(path.to);
     if (from === undefined || to === undefined || from === to) continue;
-    if (Number.isFinite(path.bikeForward) || Number.isFinite(path.walk))
-      adjacency[from]!.push({ target: to, bike: path.bikeForward, walk: path.walk });
-    if (Number.isFinite(path.bikeBackward) || Number.isFinite(path.walk))
-      adjacency[to]!.push({ target: from, bike: path.bikeBackward, walk: path.walk });
+    if (
+      Number.isFinite(path.bikeForward) ||
+      Number.isFinite(path.carForward) ||
+      Number.isFinite(path.walk)
+    )
+      adjacency[from]!.push({
+        target: to,
+        bike: path.bikeForward,
+        car: path.carForward,
+        walk: path.walk,
+      });
+    if (
+      Number.isFinite(path.bikeBackward) ||
+      Number.isFinite(path.carBackward) ||
+      Number.isFinite(path.walk)
+    )
+      adjacency[to]!.push({
+        target: from,
+        bike: path.bikeBackward,
+        car: path.carBackward,
+        walk: path.walk,
+      });
   }
   const offsets = new Uint32Array(retainedNodes.length + 1);
   const targets: number[] = [];
   const bikeWeights: number[] = [];
   const walkWeights: number[] = [];
+  const carWeights: number[] = [];
   adjacency.forEach((list, index) => {
     offsets[index] = targets.length;
     for (const edge of list) {
       targets.push(edge.target);
       bikeWeights.push(edge.bike);
       walkWeights.push(edge.walk);
+      carWeights.push(edge.car);
     }
   });
   offsets[retainedNodes.length] = targets.length;
@@ -561,15 +628,16 @@ function contractNetwork(coordinates: Coordinate[], edges: RawEdge[]) {
     targets: Uint32Array.from(targets),
     bikeWeights: Float32Array.from(bikeWeights),
     walkWeights: Float32Array.from(walkWeights),
+    carWeights: Float32Array.from(carWeights),
   };
 }
 
 function encodeGraph(graph: ReturnType<typeof contractNetwork>) {
   const nodeCount = graph.nodes.length,
     edgeCount = graph.targets.length;
-  const buffer = new ArrayBuffer(12 + nodeCount * 8 + (nodeCount + 1) * 4 + edgeCount * 8);
+  const buffer = new ArrayBuffer(12 + nodeCount * 8 + (nodeCount + 1) * 4 + edgeCount * 10);
   const view = new DataView(buffer);
-  [...new TextEncoder().encode('GWG2')].forEach((byte, index) => view.setUint8(index, byte));
+  [...new TextEncoder().encode('GWG3')].forEach((byte, index) => view.setUint8(index, byte));
   view.setUint32(4, nodeCount, true);
   view.setUint32(8, edgeCount, true);
   let cursor = 12;
@@ -596,13 +664,22 @@ function encodeGraph(graph: ReturnType<typeof contractNetwork>) {
     view.setUint16(cursor, encodedWeight(value), true);
     cursor += 2;
   }
+  for (const value of graph.carWeights) {
+    view.setUint16(cursor, encodedWeight(value), true);
+    cursor += 2;
+  }
   return new Uint8Array(buffer);
 }
 
 function buildPlaces(elements: OverpassElement[]) {
-  const groceries: Place[] = [],
-    parks: Place[] = [],
-    search: Array<{ id: string; label: string; coordinates: Coordinate; kind: string }> = [];
+  const categories: Record<CategoryId, Place[]> = {
+    grocery: [],
+    school: [],
+    healthcare: [],
+    park: [],
+    cinema: [],
+  };
+  const search: Array<{ id: string; label: string; coordinates: Coordinate; kind: string }> = [];
   const seen = new Set<string>();
   for (const element of elements) {
     const tags = element.tags ?? {},
@@ -611,10 +688,35 @@ function buildPlaces(elements: OverpassElement[]) {
     if (!coordinate || !name) continue;
     const id = `osm-${element.type}-${element.id}`,
       shop = tags.shop;
-    if (['supermarket', 'grocery', 'convenience'].includes(shop))
-      groceries.push({ id, name, coordinates: coordinate, type: shop as Place['type'] });
+    if (['supermarket', 'grocery', 'convenience'].includes(shop)) {
+      categories.grocery.push({
+        id,
+        name,
+        coordinates: coordinate,
+        type: shop as Place['type'],
+      });
+    }
+    const amenityCategory =
+      tags.amenity === 'school'
+        ? 'school'
+        : ['hospital', 'clinic', 'pharmacy'].includes(tags.amenity)
+          ? 'healthcare'
+          : tags.amenity === 'cinema'
+            ? 'cinema'
+            : null;
+    if (amenityCategory) {
+      categories[amenityCategory].push({
+        id,
+        name,
+        coordinates: coordinate,
+        accessPoints:
+          element.type !== 'node' && ['school', 'healthcare'].includes(amenityCategory)
+            ? perimeterAccessPoints(element, coordinate)
+            : undefined,
+      });
+    }
     if (tags.leisure === 'park') {
-      parks.push({
+      categories.park.push({
         id,
         name,
         coordinates: coordinate,
@@ -628,9 +730,13 @@ function buildPlaces(elements: OverpassElement[]) {
       search.push({ id, label: name, coordinates: coordinate, kind: 'poi' });
     }
   }
-  if (!groceries.length || !parks.length)
-    throw new Error('The real OSM extract did not contain named groceries and parks.');
-  return { groceries, parks, search };
+  const emptyCategories = CATEGORY_IDS.filter((category) => categories[category].length === 0);
+  if (emptyCategories.length) {
+    throw new Error(
+      `The real OSM extract did not contain named places for: ${emptyCategories.join(', ')}.`,
+    );
+  }
+  return { categories, search };
 }
 function parseFeatureCollection(bytes: Uint8Array) {
   const collection = JSON.parse(new TextDecoder().decode(bytes)) as FeatureCollection<
@@ -756,9 +862,9 @@ async function main() {
         : 'Hyderabad, Telangana, India',
     attribution: '© OpenStreetMap contributors',
     license: city.slug === 'sf' ? 'ODbL 1.0 (OSM); PDDL 1.0 (DataSF)' : 'ODbL 1.0 (OSM)',
-    graphFormat: 'groundwork-graph-v2',
+    graphFormat: 'sweetspot-graph-v3',
     method:
-      'Contracted street graph with destination-oriented directed bicycle times, pedestrian-network times, and sampled park perimeter access.',
+      'Contracted street graph with destination-oriented bicycle, pedestrian, and free-flow driving times, plus sampled perimeter access for mapped areas.',
     assets: {
       graph: graphFile,
       places: placesFile,
@@ -769,8 +875,9 @@ async function main() {
     counts: {
       graphNodes: graph.nodes.length,
       directedEdges: graph.targets.length,
-      groceries: places.groceries.length,
-      parks: places.parks.length,
+      places: Object.fromEntries(
+        CATEGORY_IDS.map((category) => [category, places.categories[category].length]),
+      ),
       searchEntries: places.search.length,
       neighborhoods: neighborhoods.features.length,
     },
@@ -811,10 +918,7 @@ async function main() {
   };
   await Promise.all([
     writeFile(join(outputDirectory, graphFile), compressedGraph),
-    writeFile(
-      join(outputDirectory, placesFile),
-      `${JSON.stringify({ groceries: places.groceries, parks: places.parks, search: places.search })}\n`,
-    ),
+    writeFile(join(outputDirectory, placesFile), `${JSON.stringify(places)}\n`),
     writeFile(
       join(outputDirectory, neighborhoodsFile),
       `${JSON.stringify(simplifiedNeighborhoods)}\n`,

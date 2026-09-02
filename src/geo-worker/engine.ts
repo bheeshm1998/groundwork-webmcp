@@ -22,6 +22,8 @@ import type {
   Coordinate,
   DerivedAnalysis,
   RestrictionResult,
+  PlaceCategory,
+  TravelMode,
 } from '../domain/schemas';
 import {
   dijkstra,
@@ -29,8 +31,8 @@ import {
   nearestNode,
   nearestNodeForMode,
   reverseGraph,
+  weightsForMode,
   type GraphData,
-  type TravelMode,
 } from './graph';
 
 export interface PlaceRecord {
@@ -42,12 +44,11 @@ export interface PlaceRecord {
 }
 
 export interface PlacesData {
-  groceries: PlaceRecord[];
-  parks: PlaceRecord[];
+  categories: Record<PlaceCategory, PlaceRecord[]>;
   search: Array<{ id: string; label: string; coordinates: Coordinate; kind: 'poi' | 'street' }>;
 }
 
-interface BikeContext {
+interface TravelContext {
   distances: Float32Array;
 }
 
@@ -88,7 +89,7 @@ function makeNetworkArea(
 ): AreaGeometry | null {
   const cells = new Set<string>();
   const coveredSegments = new Set<string>();
-  const weights = mode === 'bike' ? graph.bikeWeights : graph.walkWeights;
+  const weights = weightsForMode(graph, mode);
   for (let index = 0; index < distances.length; index += 1) {
     const reachedAt = distances[index]!;
     if (!Number.isFinite(reachedAt)) continue;
@@ -144,11 +145,11 @@ function makeNetworkArea(
 
 export class GeoEngine {
   readonly graph: GraphData;
-  private readonly reverseBikeGraph: GraphData;
+  private readonly reverseTravelGraph: GraphData;
   private readonly nodeBuckets = new Map<string, number[]>();
   private readonly conditionCache = new Map<
     string,
-    { layer: AreaGeometry | null; bike?: BikeContext; access?: AccessContext }
+    { layer: AreaGeometry | null; travel?: TravelContext; access?: AccessContext }
   >();
 
   constructor(
@@ -162,7 +163,7 @@ export class GeoEngine {
     readonly nodeLabels: Array<string | null> = [],
   ) {
     this.graph = graph;
-    this.reverseBikeGraph = reverseGraph(graph);
+    this.reverseTravelGraph = reverseGraph(graph);
     for (let index = 0; index < graph.lng.length; index += 1) {
       const cell = latLngToCell(graph.lat[index]!, graph.lng[index]!, 10);
       const bucket = this.nodeBuckets.get(cell);
@@ -227,64 +228,83 @@ export class GeoEngine {
   private computeConditionLayer(
     canonical: CanonicalWorkspace,
     condition: Condition,
-  ): { layer: AreaGeometry | null; bike?: BikeContext; access?: AccessContext } {
+  ): { layer: AreaGeometry | null; travel?: TravelContext; access?: AccessContext } {
     if (condition.kind === 'preference') {
       return { layer: safeIntersect(condition.geometry as AreaGeometry, this.boundary) };
     }
     if (condition.kind === 'access') {
+      const categoryPlaces = this.places.categories[condition.category];
       const places =
-        condition.category === 'park'
-          ? this.places.parks
-          : this.places.groceries.filter(
+        condition.category === 'grocery'
+          ? categoryPlaces.filter(
               (place) =>
                 condition.groceryType === 'supermarket_or_grocery' || place.type === 'supermarket',
-            );
+            )
+          : categoryPlaces;
       const originPlaces: PlaceRecord[] = [];
       const origins = places.flatMap((place) =>
         (place.accessPoints?.length ? place.accessPoints : [place.coordinates]).map(
           (coordinate) => {
             originPlaces.push(place);
-            return nearestNodeForMode(this.graph, coordinate, 'walk');
+            return nearestNodeForMode(this.reverseTravelGraph, coordinate, condition.mode);
           },
         ),
       );
       const access = {
-        ...multiSourceDijkstra(this.graph, origins, condition.maxMinutes, 'walk'),
+        ...multiSourceDijkstra(
+          this.reverseTravelGraph,
+          origins,
+          condition.maxMinutes,
+          condition.mode,
+        ),
         places: originPlaces,
       };
       return {
         layer: makeNetworkArea(
-          this.graph,
+          this.reverseTravelGraph,
           access.distances,
           condition.maxMinutes,
-          'walk',
+          condition.mode,
           this.boundary,
         ),
         access,
       };
     }
-    if (!canonical.office) return { layer: null };
-    const origin = nearestNodeForMode(this.reverseBikeGraph, canonical.office.coordinates, 'bike');
-    const distances = dijkstra(this.reverseBikeGraph, origin, condition.maxMinutes);
+    const destination = canonical.destinations.find(({ id }) => id === condition.destinationId);
+    if (!destination) return { layer: null };
+    const origin = nearestNodeForMode(
+      this.reverseTravelGraph,
+      destination.coordinates,
+      condition.mode,
+    );
+    const distances = dijkstra(
+      this.reverseTravelGraph,
+      origin,
+      condition.maxMinutes,
+      condition.mode,
+    );
     return {
       layer: makeNetworkArea(
-        this.reverseBikeGraph,
+        this.reverseTravelGraph,
         distances,
         condition.maxMinutes,
-        'bike',
+        condition.mode,
         this.boundary,
       ),
-      bike: { distances },
+      travel: { distances },
     };
   }
 
   private cachedConditionLayer(
     canonical: CanonicalWorkspace,
     condition: Condition,
-  ): { layer: AreaGeometry | null; bike?: BikeContext; access?: AccessContext } {
+  ): { layer: AreaGeometry | null; travel?: TravelContext; access?: AccessContext } {
     const key = JSON.stringify({
       condition,
-      office: condition.kind === 'bike' ? canonical.office?.coordinates : undefined,
+      destination:
+        condition.kind === 'travel'
+          ? canonical.destinations.find(({ id }) => id === condition.destinationId)?.coordinates
+          : undefined,
     });
     const cached = this.conditionCache.get(key);
     if (cached) return cached;
@@ -299,12 +319,12 @@ export class GeoEngine {
 
   analyze(canonical: CanonicalWorkspace): DerivedAnalysis {
     const layers: Record<string, AreaGeometry> = {};
-    const bikeContexts: Record<string, BikeContext> = {};
+    const travelContexts: Record<string, TravelContext> = {};
     const accessContexts: Record<string, AccessContext> = {};
     for (const condition of canonical.conditions) {
       const result = this.cachedConditionLayer(canonical, condition);
       if (result.layer) layers[condition.id] = result.layer;
-      if (result.bike) bikeContexts[condition.id] = result.bike;
+      if (result.travel) travelContexts[condition.id] = result.travel;
       if (result.access) accessContexts[condition.id] = result.access;
     }
 
@@ -318,7 +338,7 @@ export class GeoEngine {
         : null;
     const feasibleAreaKm2 = feasibleRegion ? area(feasibleRegion) / 1_000_000 : 0;
     const candidates = feasibleRegion
-      ? this.rank(canonical, feasibleRegion, bikeContexts, accessContexts)
+      ? this.rank(canonical, feasibleRegion, travelContexts, accessContexts)
       : [];
     const restriction =
       feasibleRegion || canonical.combined
@@ -330,19 +350,12 @@ export class GeoEngine {
   private rank(
     canonical: CanonicalWorkspace,
     feasible: AreaGeometry,
-    bikeContexts: Record<string, BikeContext>,
+    travelContexts: Record<string, TravelContext>,
     accessContexts: Record<string, AccessContext>,
   ): Candidate[] {
-    const bikeConditions = canonical.conditions.filter(
-      (condition): condition is Extract<Condition, { kind: 'bike' }> => condition.kind === 'bike',
-    );
-    const groceryConditions = canonical.conditions.filter(
-      (condition): condition is Extract<Condition, { kind: 'access' }> =>
-        condition.kind === 'access' && condition.category === 'grocery',
-    );
-    const parkConditions = canonical.conditions.filter(
-      (condition): condition is Extract<Condition, { kind: 'access' }> =>
-        condition.kind === 'access' && condition.category === 'park',
+    const measurableConditions = canonical.conditions.filter(
+      (condition): condition is Exclude<Condition, { kind: 'preference' }> =>
+        condition.kind !== 'preference',
     );
     const removed = new Set(canonical.removedCandidateIds);
     const scored: Candidate[] = [];
@@ -376,65 +389,47 @@ export class GeoEngine {
     }
 
     for (const [id, center] of seeds) {
-      const bikeMinutes = bikeConditions.length
-        ? Math.max(
-            ...bikeConditions.map((condition) => {
-              const context = bikeContexts[condition.id];
-              const node = context ? this.nearestReachedNode(center, context.distances) : -1;
-              return node >= 0 ? context!.distances[node]! : Number.POSITIVE_INFINITY;
-            }),
-          )
-        : null;
-      const groceryAccess = groceryConditions[0]
-        ? accessContexts[groceryConditions[0].id]
-        : undefined;
-      const parkAccess = parkConditions[0] ? accessContexts[parkConditions[0].id] : undefined;
-      const groceryNode = groceryAccess
-        ? this.nearestReachedNode(center, groceryAccess.distances)
-        : -1;
-      const parkNode = parkAccess ? this.nearestReachedNode(center, parkAccess.distances) : -1;
-      const groceryMinutes = groceryNode >= 0 ? groceryAccess!.distances[groceryNode]! : null;
-      const parkMinutes = parkNode >= 0 ? parkAccess!.distances[parkNode]! : null;
-      const groceryOwner = groceryNode >= 0 ? groceryAccess!.owners[groceryNode]! : -1;
-      const parkOwner = parkNode >= 0 ? parkAccess!.owners[parkNode]! : -1;
-      const nearestGrocery =
-        groceryOwner >= 0 ? (groceryAccess?.places[groceryOwner]?.name ?? null) : null;
-      const nearestPark = parkOwner >= 0 ? (parkAccess?.places[parkOwner]?.name ?? null) : null;
-      const margins: Array<{ label: string; slack: number }> = [];
-      for (const bike of bikeConditions) {
-        const context = bikeContexts[bike.id];
+      const metrics = measurableConditions.flatMap((condition) => {
+        if (condition.kind === 'travel') {
+          const context = travelContexts[condition.id];
+          const node = context ? this.nearestReachedNode(center, context.distances) : -1;
+          const minutes = node >= 0 && context ? context.distances[node] : undefined;
+          if (minutes === undefined || !Number.isFinite(minutes)) return [];
+          return [
+            {
+              conditionId: condition.id,
+              label: condition.label,
+              minutes,
+              nearestPlaceName: null,
+              slack: (condition.maxMinutes - minutes) / condition.maxMinutes,
+            },
+          ];
+        }
+        const context = accessContexts[condition.id];
         const node = context ? this.nearestReachedNode(center, context.distances) : -1;
-        const minutes = node >= 0 ? context!.distances[node]! : Number.POSITIVE_INFINITY;
-        margins.push({
-          label: 'bike commute',
-          slack: (bike.maxMinutes - minutes) / bike.maxMinutes,
-        });
-      }
-      for (const grocery of groceryConditions) {
-        const context = accessContexts[grocery.id];
-        const node = context ? this.nearestReachedNode(center, context.distances) : -1;
-        const minutes = node >= 0 ? context!.distances[node]! : Number.POSITIVE_INFINITY;
-        margins.push({
-          label: 'grocery access',
-          slack: (grocery.maxMinutes - minutes) / grocery.maxMinutes,
-        });
-      }
-      for (const park of parkConditions) {
-        const context = accessContexts[park.id];
-        const node = context ? this.nearestReachedNode(center, context.distances) : -1;
-        const minutes = node >= 0 ? context!.distances[node]! : Number.POSITIVE_INFINITY;
-        margins.push({
-          label: 'park access',
-          slack: (park.maxMinutes - minutes) / park.maxMinutes,
-        });
-      }
-      const normalized = margins.map(({ slack }) => Math.max(0, Math.min(1, slack)));
+        if (!context || node < 0) return [];
+        const minutes = context.distances[node];
+        if (minutes === undefined || !Number.isFinite(minutes)) return [];
+        const owner = context.owners[node];
+        return [
+          {
+            conditionId: condition.id,
+            label: condition.label,
+            minutes,
+            nearestPlaceName:
+              owner !== undefined && owner >= 0 ? (context.places[owner]?.name ?? null) : null,
+            slack: (condition.maxMinutes - minutes) / condition.maxMinutes,
+          },
+        ];
+      });
+      if (metrics.length !== measurableConditions.length) continue;
+      const normalized = metrics.map(({ slack }) => Math.max(0, Math.min(1, slack)));
       const minimumSlack = normalized.length ? Math.min(...normalized) : 0;
       const averageSlack = normalized.length
         ? normalized.reduce((sum, value) => sum + value, 0) / normalized.length
         : 0;
-      const weakest = margins.toSorted((a, b) => a.slack - b.slack)[0];
-      const comfortable = margins.filter(({ slack }) => slack >= 0.25).map(({ label }) => label);
+      const weakest = metrics.toSorted((a, b) => a.slack - b.slack)[0];
+      const comfortable = metrics.filter(({ slack }) => slack >= 0.25).map(({ label }) => label);
       scored.push({
         id,
         name: '',
@@ -442,16 +437,11 @@ export class GeoEngine {
         score: minimumSlack * 0.7 + averageSlack * 0.3,
         minimumSlack,
         averageSlack,
-        bikeMinutes: bikeMinutes !== null && Number.isFinite(bikeMinutes) ? bikeMinutes : null,
-        groceryMinutes:
-          groceryMinutes !== null && Number.isFinite(groceryMinutes) ? groceryMinutes : null,
-        parkMinutes: parkMinutes !== null && Number.isFinite(parkMinutes) ? parkMinutes : null,
-        nearestGrocery,
-        nearestPark,
+        metrics,
         comfortable,
         closeToFailing: weakest && weakest.slack <= 0.1 ? weakest.label : null,
         tradeoff: weakest
-          ? `${weakest.label} has the least remaining margin${nearestGrocery ? `; nearest grocery is ${nearestGrocery}` : ''}${nearestPark ? ` and nearest park is ${nearestPark}` : ''}.`
+          ? `${weakest.label} has the least remaining margin${weakest.nearestPlaceName ? `; nearest matching place is ${weakest.nearestPlaceName}` : ''}.`
           : 'Inside the current preference area.',
       });
     }
@@ -538,7 +528,7 @@ export class GeoEngine {
 
     let relaxedAreaKm2: number | null = null;
     if (strongest.condition.kind !== 'preference') {
-      const maxMinutes = strongest.condition.kind === 'bike' ? 90 : 45;
+      const maxMinutes = strongest.condition.kind === 'travel' ? 90 : 45;
       if (strongest.condition.maxMinutes >= maxMinutes) {
         return {
           conditionId: strongest.condition.id,

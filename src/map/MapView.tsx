@@ -46,13 +46,18 @@ function syncWorkspaceSources(
         properties: {
           ...layer.properties,
           conditionId: condition.id,
-          kind: condition.kind === 'access' ? condition.category : condition.kind,
+          kind:
+            condition.kind === 'access'
+              ? condition.category
+              : condition.kind === 'travel'
+                ? condition.mode
+                : condition.kind,
         },
       });
     }
   }
-  setSourceData(map, 'groundwork-conditions', { type: 'FeatureCollection', features });
-  setSourceData(map, 'groundwork-feasible', derived.feasibleRegion ?? EMPTY_COLLECTION);
+  setSourceData(map, 'sweetspot-conditions', { type: 'FeatureCollection', features });
+  setSourceData(map, 'sweetspot-feasible', derived.feasibleRegion ?? EMPTY_COLLECTION);
   const candidateFeatures: Array<Feature<Point>> = derived.candidates.map((candidate, index) => ({
     type: 'Feature',
     properties: {
@@ -62,7 +67,7 @@ function syncWorkspaceSources(
     },
     geometry: { type: 'Point', coordinates: candidate.coordinates },
   }));
-  setSourceData(map, 'groundwork-candidates', {
+  setSourceData(map, 'sweetspot-candidates', {
     type: 'FeatureCollection',
     features: candidateFeatures,
   });
@@ -71,7 +76,7 @@ function syncWorkspaceSources(
 export function MapView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
-  const officeMarkerRef = useRef<Marker | null>(null);
+  const destinationMarkersRef = useRef(new Map<string, Marker>());
   const drawControlRef = useRef<MaplibreTerradrawControl | null>(null);
   const drawnPreferenceIdRef = useRef<string | number | null>(null);
   const syncingDrawRef = useRef(false);
@@ -79,7 +84,7 @@ export function MapView() {
   const [mapAttempt, setMapAttempt] = useState(0);
   const [drawReadyVersion, setDrawReadyVersion] = useState(0);
   const canonical = useWorkspaceStore((state) => state.canonical);
-  const office = useWorkspaceStore((state) => state.canonical.office);
+  const destinations = useWorkspaceStore((state) => state.canonical.destinations);
   const derived = useWorkspaceStore((state) => state.derived);
   const cityId = useWorkspaceStore((state) => state.cityId);
   const city = CITIES[cityId];
@@ -87,6 +92,7 @@ export function MapView() {
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    const destinationMarkers = destinationMarkersRef.current;
     let map: MapLibreMap;
     try {
       map = new maplibregl.Map({
@@ -138,63 +144,83 @@ export function MapView() {
       const readyDraw = drawControl.getTerraDrawInstance();
       if (readyDraw && !readyDraw.enabled) readyDraw.start();
       useWorkspaceStore.getState().commit({ drawingReady: Boolean(readyDraw?.enabled) });
-      map.addSource('groundwork-conditions', { type: 'geojson', data: EMPTY_COLLECTION });
+      map.addSource('sweetspot-conditions', { type: 'geojson', data: EMPTY_COLLECTION });
       map.addLayer({
-        id: 'groundwork-condition-fill',
+        id: 'sweetspot-condition-fill',
         type: 'fill',
-        source: 'groundwork-conditions',
+        source: 'sweetspot-conditions',
         paint: {
           'fill-color': [
             'match',
             ['get', 'kind'],
             'bike',
             '#29d3d1',
+            'walk',
+            '#58a8ff',
+            'car',
+            '#ff7657',
             'grocery',
             '#f0a43c',
+            'school',
+            '#aa8ff3',
+            'healthcare',
+            '#ff6f91',
             'park',
             '#5cc47b',
+            'cinema',
+            '#ffc857',
             '#aa8ff3',
           ],
           'fill-opacity': 0.22,
         },
       });
       map.addLayer({
-        id: 'groundwork-condition-line',
+        id: 'sweetspot-condition-line',
         type: 'line',
-        source: 'groundwork-conditions',
+        source: 'sweetspot-conditions',
         paint: {
           'line-color': [
             'match',
             ['get', 'kind'],
             'bike',
             '#29d3d1',
+            'walk',
+            '#58a8ff',
+            'car',
+            '#ff7657',
             'grocery',
             '#f0a43c',
+            'school',
+            '#aa8ff3',
+            'healthcare',
+            '#ff6f91',
             'park',
             '#5cc47b',
+            'cinema',
+            '#ffc857',
             '#aa8ff3',
           ],
           'line-width': 2,
         },
       });
-      map.addSource('groundwork-feasible', { type: 'geojson', data: EMPTY_COLLECTION });
+      map.addSource('sweetspot-feasible', { type: 'geojson', data: EMPTY_COLLECTION });
       map.addLayer({
-        id: 'groundwork-feasible-fill',
+        id: 'sweetspot-feasible-fill',
         type: 'fill',
-        source: 'groundwork-feasible',
+        source: 'sweetspot-feasible',
         paint: { 'fill-color': '#d9ff5a', 'fill-opacity': 0.42 },
       });
       map.addLayer({
-        id: 'groundwork-feasible-line',
+        id: 'sweetspot-feasible-line',
         type: 'line',
-        source: 'groundwork-feasible',
+        source: 'sweetspot-feasible',
         paint: { 'line-color': '#efffa8', 'line-width': 3, 'line-dasharray': [2, 1] },
       });
-      map.addSource('groundwork-candidates', { type: 'geojson', data: EMPTY_COLLECTION });
+      map.addSource('sweetspot-candidates', { type: 'geojson', data: EMPTY_COLLECTION });
       map.addLayer({
-        id: 'groundwork-candidate-points',
+        id: 'sweetspot-candidate-points',
         type: 'circle',
-        source: 'groundwork-candidates',
+        source: 'sweetspot-candidates',
         paint: {
           'circle-radius': ['case', ['boolean', ['get', 'selected'], false], 13, 10],
           'circle-color': ['case', ['boolean', ['get', 'selected'], false], '#d9ff5a', '#102d2b'],
@@ -203,15 +229,15 @@ export function MapView() {
         },
       });
       map.addLayer({
-        id: 'groundwork-candidate-labels',
+        id: 'sweetspot-candidate-labels',
         type: 'symbol',
-        source: 'groundwork-candidates',
+        source: 'sweetspot-candidates',
         layout: { 'text-field': ['get', 'rank'], 'text-size': 12, 'text-font': ['Noto Sans Bold'] },
         paint: {
           'text-color': ['case', ['boolean', ['get', 'selected'], false], '#102d2b', '#f5ffe1'],
         },
       });
-      map.on('click', 'groundwork-candidate-points', (event: MapLayerMouseEvent) => {
+      map.on('click', 'sweetspot-candidate-points', (event: MapLayerMouseEvent) => {
         const candidateId = event.features?.[0]?.properties?.candidateId as string | undefined;
         if (candidateId)
           void workspaceService.execute({ type: 'select-candidate', id: candidateId });
@@ -259,8 +285,8 @@ export function MapView() {
         cancelPreferenceDraw();
       }
     };
-    window.addEventListener('groundwork:start-draw', onStartDraw);
-    window.addEventListener('groundwork:cancel-draw', onCancelDraw);
+    window.addEventListener('sweetspot:start-draw', onStartDraw);
+    window.addEventListener('sweetspot:cancel-draw', onCancelDraw);
     window.addEventListener('keydown', onKeyDown);
 
     const draw = drawControl.getTerraDrawInstance();
@@ -345,12 +371,13 @@ export function MapView() {
       draw?.off('finish', onFinish);
       draw?.off('change', onDrawChange);
       useWorkspaceStore.getState().commit({ drawingReady: false });
-      window.removeEventListener('groundwork:start-draw', onStartDraw);
-      window.removeEventListener('groundwork:cancel-draw', onCancelDraw);
+      window.removeEventListener('sweetspot:start-draw', onStartDraw);
+      window.removeEventListener('sweetspot:cancel-draw', onCancelDraw);
       window.removeEventListener('keydown', onKeyDown);
       map.off('error', onMapError);
       map.off('moveend', onMoveEnd);
-      officeMarkerRef.current?.remove();
+      for (const marker of destinationMarkers.values()) marker.remove();
+      destinationMarkers.clear();
       map.remove();
       drawControlRef.current = null;
       mapRef.current = null;
@@ -397,26 +424,34 @@ export function MapView() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    officeMarkerRef.current?.remove();
-    officeMarkerRef.current = null;
-    if (!office) return;
-    const marker = new maplibregl.Marker({ color: '#ff7657', draggable: true })
-      .setLngLat(office.coordinates)
-      .setPopup(new maplibregl.Popup({ offset: 24 }).setText(office.label))
-      .addTo(map);
-    marker.on('dragend', async () => {
-      const location = marker.getLngLat();
-      const result = await workspaceService.execute({
-        type: 'set-office',
-        office: { label: 'Moved office marker', coordinates: [location.lng, location.lat] },
+    for (const marker of destinationMarkersRef.current.values()) marker.remove();
+    destinationMarkersRef.current.clear();
+    const colors = ['#ff7657', '#aa8ff3', '#29d3d1', '#ffc857'];
+    destinations.forEach((destination, index) => {
+      const marker = new maplibregl.Marker({ color: colors[index], draggable: true })
+        .setLngLat(destination.coordinates)
+        .setPopup(new maplibregl.Popup({ offset: 24 }).setText(destination.label))
+        .addTo(map);
+      marker.on('dragend', async () => {
+        const location = marker.getLngLat();
+        const result = await workspaceService.execute({
+          type: 'update-destination',
+          actor: 'user',
+          destination: {
+            ...destination,
+            coordinates: [location.lng, location.lat],
+          },
+        });
+        if (!result.ok) {
+          const currentDestination = workspaceSnapshot().canonical.destinations.find(
+            ({ id }) => id === destination.id,
+          );
+          if (currentDestination) marker.setLngLat(currentDestination.coordinates);
+        }
       });
-      if (!result.ok) {
-        const currentOffice = workspaceSnapshot().canonical.office;
-        if (currentOffice) marker.setLngLat(currentOffice.coordinates);
-      }
+      destinationMarkersRef.current.set(destination.id, marker);
     });
-    officeMarkerRef.current = marker;
-  }, [office]);
+  }, [destinations]);
 
   return (
     <div className="map-shell">

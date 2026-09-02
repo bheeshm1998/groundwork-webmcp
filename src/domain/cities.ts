@@ -12,8 +12,7 @@ export interface CityConfig {
   zoom: number;
   bounds: [[number, number], [number, number]];
   mapBounds: [[number, number], [number, number]];
-  sampleOffice: { label: string; coordinates: Coordinate };
-  samplePriorities: { bikeMinutes: number; groceryMinutes: number; parkMinutes: number };
+  promptDestinations: readonly [string, string, string];
   neighborhoodAttribution: string;
 }
 
@@ -33,11 +32,11 @@ export const CITIES: Record<CityId, CityConfig> = {
       [-122.56, 37.67],
       [-122.31, 37.85],
     ],
-    sampleOffice: {
-      label: 'San Francisco City Hall',
-      coordinates: [-122.4192315, 37.7792763],
-    },
-    samplePriorities: { bikeMinutes: 25, groceryMinutes: 10, parkMinutes: 8 },
+    promptDestinations: [
+      'San Francisco City Hall',
+      'San Francisco Ferry Building',
+      'Golden Gate Park',
+    ],
     neighborhoodAttribution: 'Neighborhoods DataSF',
   },
   hyderabad: {
@@ -55,11 +54,7 @@ export const CITIES: Record<CityId, CityConfig> = {
       [78.24, 17.15],
       [78.72, 17.61],
     ],
-    sampleOffice: {
-      label: 'Ramanthapur',
-      coordinates: [78.5389989566, 17.3994486878],
-    },
-    samplePriorities: { bikeMinutes: 25, groceryMinutes: 10, parkMinutes: 8 },
+    promptDestinations: ['Gachibowli', 'Charminar', 'HITEC City Road'],
     neighborhoodAttribution: 'Neighborhoods OpenStreetMap',
   },
 };

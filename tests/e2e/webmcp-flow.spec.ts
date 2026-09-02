@@ -14,10 +14,10 @@ async function executeWebMcpTool(page: Page, name: string, input: Record<string,
       const serialized = await modelContext.executeTool(tool, JSON.stringify(toolInput));
       const result = serialized ? JSON.parse(serialized) : null;
       const dataTools = new Set([
-        'groundwork_search_locations',
-        'groundwork_get_workspace',
-        'groundwork_explain_candidate',
-        'groundwork_analyze_restriction',
+        'search_locations',
+        'get_workspace',
+        'explain_area',
+        'analyze_restriction',
       ]);
       return dataTools.has(toolName) ? result : { ok: result.ok, message: result.message };
     },
@@ -32,14 +32,12 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
   await expect
     .poll(() =>
       page.evaluate(async () =>
-        (await document.modelContext!.getTools()).some(
-          (tool) => tool.name === 'groundwork_get_workspace',
-        ),
+        (await document.modelContext!.getTools()).some((tool) => tool.name === 'get_workspace'),
       ),
     )
     .toBe(true);
 
-  const search = await executeWebMcpTool(page, 'groundwork_search_locations', {
+  const search = await executeWebMcpTool(page, 'search_locations', {
     query: 'San Francisco City Hall',
   });
   expect(search).toMatchObject({
@@ -52,54 +50,66 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
     ],
   });
 
-  await executeWebMcpTool(page, 'groundwork_set_office', {
+  await executeWebMcpTool(page, 'add_destination', {
     label: 'San Francisco City Hall',
     longitude: -122.4192315,
     latitude: 37.7792763,
   });
+  const afterDestination = (await executeWebMcpTool(page, 'get_workspace')) as {
+    data: { destinations: Array<{ id: string }> };
+  };
+  const destinationId = afterDestination.data.destinations[0]?.id;
+  if (!destinationId) throw new Error('The destination was not added.');
   await expect
     .poll(() =>
       page.evaluate(async () =>
         (await document.modelContext!.getTools()).some(
-          (tool) => tool.name === 'groundwork_add_bike_condition',
+          (tool) => tool.name === 'add_travel_condition',
         ),
       ),
     )
     .toBe(true);
 
-  await executeWebMcpTool(page, 'groundwork_add_bike_condition', { maxMinutes: 25 });
-  await executeWebMcpTool(page, 'groundwork_add_access_condition', {
+  await executeWebMcpTool(page, 'add_travel_condition', {
+    destinationId,
+    mode: 'car',
+    maxMinutes: 30,
+  });
+  await executeWebMcpTool(page, 'add_place_condition', {
     category: 'grocery',
+    mode: 'walk',
     maxMinutes: 10,
     groceryType: 'supermarket',
   });
-  await executeWebMcpTool(page, 'groundwork_add_access_condition', {
+  await executeWebMcpTool(page, 'add_place_condition', {
     category: 'park',
+    mode: 'walk',
     maxMinutes: 8,
   });
   await expect
     .poll(() =>
       page.evaluate(async () =>
         (await document.modelContext!.getTools()).some(
-          (tool) => tool.name === 'groundwork_start_preference_draw',
+          (tool) => tool.name === 'request_user_drawing',
         ),
       ),
     )
     .toBe(true);
   await page.evaluate(() => {
-    (window as any).__groundworkDrawPromise = (async () => {
-      const context = document.modelContext as typeof document.modelContext & {
-        executeTool: (tool: unknown, inputJson: string) => Promise<string | null>;
-      };
-      const tool = (await context.getTools()).find(
-        (candidate) => candidate.name === 'groundwork_start_preference_draw',
-      );
-      if (!tool) throw new Error('Drawing tool is unavailable.');
-      const serialized = await context.executeTool(tool, '{}');
-      return serialized ? JSON.parse(serialized) : null;
-    })();
+    (window as Window & { __sweetSpotDrawPromise?: Promise<unknown> }).__sweetSpotDrawPromise =
+      (async () => {
+        const context = document.modelContext as typeof document.modelContext & {
+          executeTool: (tool: unknown, inputJson: string) => Promise<string | null>;
+        };
+        const tool = (await context.getTools()).find(
+          (candidate) => candidate.name === 'request_user_drawing',
+        );
+        if (!tool) throw new Error('Drawing tool is unavailable.');
+        const serialized = await context.executeTool(tool, '{}');
+        return serialized ? JSON.parse(serialized) : null;
+      })();
   });
-  await expect(page.getByText(/Draw your preferred area/u)).toBeVisible();
+  await expect(page.getByText(/agent is waiting for you/u)).toBeVisible();
   const mapBounds = await page.getByRole('region', { name: 'Map' }).boundingBox();
   if (!mapBounds) throw new Error('The analysis map has no visible bounds.');
   await page.mouse.click(
@@ -115,56 +125,73 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
     mapBounds.y + mapBounds.height * 0.62,
   );
   await expect
-    .poll(() => page.evaluate(async () => (window as any).__groundworkDrawPromise), {
-      timeout: 15_000,
-    })
+    .poll(
+      () =>
+        page.evaluate(
+          async () =>
+            (window as Window & { __sweetSpotDrawPromise?: Promise<unknown> })
+              .__sweetSpotDrawPromise,
+        ),
+      {
+        timeout: 15_000,
+      },
+    )
     .toMatchObject({ ok: true });
   await expect(page.getByText(/Draw your preferred area/u)).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(async () =>
         (await document.modelContext!.getTools()).some(
-          (tool) => tool.name === 'groundwork_combine_conditions',
+          (tool) => tool.name === 'combine_conditions',
         ),
       ),
     )
     .toBe(true);
 
-  await executeWebMcpTool(page, 'groundwork_combine_conditions');
+  await executeWebMcpTool(page, 'combine_conditions');
   await expect
     .poll(() =>
       page.evaluate(async () =>
-        (await document.modelContext!.getTools()).some(
-          (tool) => tool.name === 'groundwork_rank_candidates',
-        ),
+        (await document.modelContext!.getTools()).some((tool) => tool.name === 'rank_areas'),
       ),
     )
     .toBe(true);
-  await executeWebMcpTool(page, 'groundwork_rank_candidates');
+  await executeWebMcpTool(page, 'rank_areas');
 
-  const workspace = await executeWebMcpTool(page, 'groundwork_get_workspace');
+  const workspace = await executeWebMcpTool(page, 'get_workspace');
   expect(workspace).toMatchObject({
     ok: true,
     data: {
       freshness: 'fresh',
-      office: { label: 'San Francisco City Hall' },
+      destinations: [{ label: 'San Francisco City Hall' }],
     },
   });
-  expect((workspace as any).data.conditions).toHaveLength(4);
-  expect((workspace as any).data.candidates).toHaveLength(3);
-  expect((workspace as any).data.feasibleAreaKm2).toBeGreaterThan(0);
+  const workspaceData = (
+    workspace as {
+      data: {
+        conditions: unknown[];
+        candidates: Array<{ id: string; metrics: unknown[] }>;
+        feasibleAreaKm2: number;
+      };
+    }
+  ).data;
+  expect(workspaceData.conditions).toHaveLength(4);
+  expect(workspaceData.candidates).toHaveLength(3);
+  expect(workspaceData.feasibleAreaKm2).toBeGreaterThan(0);
 
-  const candidate = (workspace as any).data.candidates[0];
-  const explanation = await executeWebMcpTool(page, 'groundwork_explain_candidate', {
+  const candidate = workspaceData.candidates[0];
+  if (!candidate) throw new Error('No candidate was ranked.');
+  expect(candidate.metrics).toHaveLength(3);
+  const explanation = await executeWebMcpTool(page, 'explain_area', {
     id: candidate.id,
   });
   expect(explanation).toMatchObject({ ok: true, data: { id: candidate.id } });
 
-  const restriction = await executeWebMcpTool(page, 'groundwork_analyze_restriction');
+  const restriction = await executeWebMcpTool(page, 'analyze_restriction');
   expect(restriction).toMatchObject({ ok: true });
-  expect((restriction as any).data.areaLostKm2).toBeGreaterThan(0);
+  expect((restriction as { data: { areaLostKm2: number } }).data.areaLostKm2).toBeGreaterThan(0);
 
-  await executeWebMcpTool(page, 'groundwork_select_candidate', { id: candidate.id });
+  await executeWebMcpTool(page, 'select_area', { id: candidate.id });
   await expect(page.getByTestId('candidate-list')).toBeVisible();
   await expect(page.locator('.candidate-card.selected')).toHaveCount(1);
   await expect(page.getByText('Results are up to date', { exact: true })).toBeVisible();

@@ -1,52 +1,58 @@
 # SweetSpot assumptions and constraints
 
-Last reviewed: 2026-09-02
+Last reviewed: 2026-09-03
 
 ## Product scope
 
 - SweetSpot is a client-side spatial decision aid, not a live routing, real-estate listing, safety, or accessibility service.
-- Users choose either San Francisco or Hyderabad before opening the planner. Each workspace belongs to one city and cannot combine conditions across cities.
-- The dataset fetch bounds are `[-122.53, 37.69]` to `[-122.34, 37.83]` for San Francisco and `[78.29, 17.20]` to `[78.67, 17.56]` for Hyderabad. Search entries and office coordinates are additionally checked against the selected city's actual boundary polygon; calculated regions are clipped to that same polygon.
-- A workspace may contain one bicycle condition, one grocery condition, one park condition, and one preference drawing. Setting the same type again replaces the prior condition so scoring and explanations remain unambiguous.
-- At least two conditions are required to create a combined feasible region.
+- Users choose San Francisco or Hyderabad before opening the planner. A workspace belongs to one city, and every destination, condition, calculation, and result must remain inside that city's boundary.
+- A workspace supports zero to four destinations and zero to twenty conditions. Several travel conditions can reference one destination, and several place conditions can use the same category.
+- Travel conditions use `walk`, `bike`, or `car` and a 5–90 minute limit. Place conditions use `walk` or `bike`, a 1–45 minute limit, and one of `grocery`, `school`, `healthcare`, `park`, or `cinema`. Grocery conditions may include every grocery record or supermarkets only.
+- At least two visible conditions are required to create a combined feasible region. A personal Polygon or MultiPolygon drawing can be one of those conditions.
 
 ## Shipped data
 
-- The committed `public/data/sf` assets contain a checksum-pinned OpenStreetMap extract plus official DataSF city/county and Analysis Neighborhood polygons. `public/data/hyderabad` contains a separate checksum-pinned OSM extract, the Hyderabad administrative boundary, and GHMC ward polygons. There is no synthetic fallback.
-- Every asset filename is versioned. `metadata.json` records source URLs, extract dates, SHA-256 checksums, counts, graph format, and the dataset version.
-- The street network contracts degree-2 vertices and is shipped as a custom gzip-compressed binary. The build budget is 2 MB for San Francisco and 8 MB for the larger Hyderabad graph.
-- Groceries include named OSM `shop=supermarket`, `shop=grocery`, and `shop=convenience` records. Parks use named `leisure=park` records. Nodes, ways, and relations are included. Search labels use a point on each polygon's surface; park routing samples up to 12 points around its mapped perimeter so a large park is not represented by an arbitrary interior point.
-- If `osmium-tool` is unavailable, the build uses a saved and checksummed Overpass response. Fetch, validation, unexpectedly small extract, and graph-budget failures stop the build; generated coordinates or place records are never substituted.
-- Share links store the city and are rejected when their dataset version differs from that city's loaded dataset; there is no cross-version migration.
+- The San Francisco assets contain a checksum-pinned OpenStreetMap extract plus official DataSF city/county and Analysis Neighborhood polygons. The Hyderabad assets contain a separate checksum-pinned OSM extract, the Hyderabad administrative boundary, and GHMC ward polygons. There is no synthetic fallback.
+- Version `sf-osm-datasf-2026-09-02-v3` contains 473 groceries, 285 schools, 155 healthcare facilities, 304 parks, and 16 cinemas.
+- Version `hyderabad-osm-2026-09-02-v3` contains 447 groceries, 503 schools, 1,620 healthcare facilities, 469 parks, and 119 cinemas.
+- Every asset filename is versioned. Each `metadata.json` records source URLs, extract dates, SHA-256 checksums, per-category counts, graph format, and dataset version.
+- The contracted `sweetspot-graph-v3` binary stores walking, cycling, and car weights for every directed edge. The compressed graph budget is 2 MB for San Francisco and 8 MB for Hyderabad.
+- Nodes, ways, and relations are included for place records. Search uses named OSM POIs and street names. Mapped school, healthcare, and park areas use sampled perimeter access rather than an arbitrary interior center.
+- If `osmium-tool` is unavailable, the build uses the saved and checksummed Overpass response. Fetch, validation, unexpectedly small extract, missing-category, and graph-budget failures stop the build; generated coordinates and place records are never substituted.
+- Share links store the city and are rejected if their dataset version differs from the loaded city's version. There is no cross-version migration.
 
 ## Calculation assumptions
 
-- Walking access uses multi-source Dijkstra from every applicable grocery point and sampled park perimeter point over pedestrian-eligible OSM edges at a modeled 4.8 km/h. It accounts for the extracted street connectivity, but not elevation, untagged barriers, mapped gate restrictions, accessibility, opening hours, or temporary closures.
-- Bicycle minutes use directional OSM-eligible edges and modeled road-class speeds. The routing graph is reversed for the search so minutes represent travel from each candidate home to the destination, including one-way streets in the correct commute direction. Reachable polygons sample full and partially reachable edges, interpolating the exact time cutoff before polygonization. They do not model traffic, elevation, rider ability, surface quality, construction, or live closures.
-- Grocery type is enforced consistently in both feasible-area construction and candidate scoring. “Supermarket” excludes records typed only as grocery.
-- Every hard condition must produce a valid layer. If any layer is missing or cannot intersect the supported boundary, the combined feasible region is empty rather than silently dropping that condition.
-- Candidate points are generated from H3 cells whose centers are inside the feasible polygon, kept at least 300 m apart, and named with the containing DataSF Analysis Neighborhood or GHMC ward plus the nearest named OSM cross-street. Regions smaller than a cell use a Turf point-on-feature fallback; the final coordinate is checked against the feasible geometry.
-- Candidate ranking maximizes the weakest normalized margin first and average margin second. It is deterministic but is not a statistical recommendation or market ranking.
-- Condition layers are cached in the worker for the 50 most recent exact inputs. Calculations are synchronous inside the worker and cannot be interrupted mid-algorithm; the UI prevents conflicting mutations, and an aborted WebMCP request is prevented from committing after the worker returns.
+- Walking and cycling place access use multi-source Dijkstra over mode-eligible OSM edges. Walking is modeled at 4.8 km/h; cycling uses directional road-class speeds.
+- Travel limits represent a trip from each candidate area to its selected destination. The destination-oriented search uses a reversed graph so OSM one-way direction is applied in the trip's actual direction.
+- Car travel is a free-flow estimate. It uses drivable highway classes, access tags, one-way tags, and parsable `maxspeed` values. It excludes known pedestrian-only and non-drivable ways. It does not model current or historical congestion, turn penalties, signals, parking, road incidents, or temporary closures.
+- Reachable polygons include fully reachable edges and interpolate partially reachable edge cutoffs before polygonization. Access areas are network-based, not straight-line buffers.
+- Grocery subtype filtering is enforced in feasible-area calculation and candidate metrics. “Supermarket” excludes records typed only as grocery or convenience.
+- Every hard condition must produce a valid layer. A missing layer or failed intersection makes the feasible region empty; the engine never silently drops that condition.
+- Candidate points come from H3 cell centers inside the feasible polygon, stay at least 300 m apart, and use the containing DataSF neighborhood or GHMC ward plus the nearest named cross-street. Very small regions use a Turf point-on-feature fallback checked against the final geometry.
+- Candidate metrics are generated from the actual active conditions. A result can therefore show several travel or place metrics of the same kind without fixed “office/grocery/park” fields.
+- Ranking maximizes the weakest normalized margin first and average margin second. It is deterministic, but it is not a statistical recommendation or market ranking.
+- The worker caches the 50 most recent exact condition inputs. Calculations are synchronous inside the worker and cannot be interrupted mid-algorithm; an aborted WebMCP request is prevented from committing after the worker returns.
 
 ## Workspace and input limits
 
-- Bicycle limits are 5–90 minutes. Grocery and park limits are 1–45 minutes.
-- Preference geometry is limited to valid closed Polygon/MultiPolygon rings and 500 vertices total. Share fragments are limited to 8,192 compressed URL characters and 256,000 decompressed bytes.
-- Activity keeps the most recent 40 entries. Undo stores one meaningful canonical change. Recalculation, ranking, candidate selection, map movement, and layer visibility do not consume that undo slot.
-- Local autosave includes activity and the one-step undo snapshot. Public share links include only the current canonical plan and intentionally omit private history and undo state.
-- Reset requires confirmation, keeps a one-session undo snapshot, clears the share hash, and clears persisted state. Running the sample over existing work also requires explicit replacement confirmation.
-- If browser persistence fails, the in-memory change remains active and SweetSpot reports that it could not autosave. A reload can then lose that session-only change.
+- Destination search and coordinates are boundary-checked. Up to four destinations may be dragged manually after creation.
+- Preference geometry is limited to valid, closed Polygon/MultiPolygon rings and 500 total vertices. Share fragments are limited to 8,192 compressed URL characters and 256,000 decompressed bytes.
+- Activity keeps the most recent 40 entries and labels user and agent actions. Undo stores one meaningful canonical change. Recalculation, ranking, selection, map movement, and layer visibility do not consume that undo slot.
+- Local autosave includes activity and the one-step undo snapshot. Public share links contain only the canonical plan and intentionally omit private history and undo state.
+- Update recalculates stale analysis. Reset requires a second click, keeps a one-session undo snapshot, clears the share hash, and clears persisted state.
+- If browser persistence fails, the in-memory change remains active and SweetSpot reports that autosave failed. Reloading can then lose that session-only change.
 
 ## Browser, map, and WebMCP constraints
 
-- Base-map tiles require network access. Analysis, pedestrian/bicycle routing, candidate naming, and search remain local. A failed map/style load shows a retryable fallback while panel results remain usable.
-- Search uses the bundled OSM index of named POIs and street names. `VITE_MAPTILER_KEY` changes only the base-map provider; public keys must be origin-restricted.
-- Browsers without native `document.modelContext` use the pinned MCP-B polyfill. This makes the tool-registration surface available but does not by itself connect an AI client; discovery still requires a compatible MCP-B extension/relay or a native browser assistant.
-- A deployed WebMCP release requires `VITE_WEBMCP_ORIGIN_TRIAL_TOKEN` for the exact final origin. `npm run build:release` and the Vercel build fail if it is absent. Ordinary `npm run build` intentionally remains available for local/manual verification and omits an empty origin-trial tag.
-- WebMCP write results are compact summaries; full GeoJSON stays inside the page. Capability changes are diffed so unrelated state updates do not abort and re-register stable tools.
+- Base-map tiles require network access. Analysis, graph routing, candidate naming, and bundled search remain local. A failed map/style load shows a retryable fallback while the panels remain usable.
+- `VITE_MAPTILER_KEY` changes only the base-map provider; public keys must be origin-restricted. Search can fall back to the configured Photon-compatible endpoint when the local index has no match.
+- Browsers without native `document.modelContext` use the pinned MCP-B polyfill. It exposes the registration surface but does not itself connect an AI client.
+- Tool descriptions state accepted enums, units, and limits. Tool availability is derived from live workspace state, and WebMCP writes call the same service used by manual controls.
+- `request_user_drawing` deliberately suspends while the person draws or cancels. The visible activity strip reports that waiting state.
+- A deployed Chrome origin-trial release requires `VITE_WEBMCP_ORIGIN_TRIAL_TOKEN` for the exact final origin. `build:release` fails without it; ordinary local builds omit an empty token.
 
 ## Release constraints
 
-- Before describing a release as current, rebuild and review each city's source checksums, POI coverage, graph directionality, and boundary versions.
-- A release still requires a deployed-origin WebMCP smoke test and comparison against an independent routing source. Real source data removes fabrication; it does not turn modeled travel time into a guarantee.
+- Before describing a release as current, rebuild and review both cities' source checksums, category coverage, graph directionality, and boundary versions.
+- A release requires unit, lint, formatting, build, end-to-end, local browser, and deployed-origin browser checks. Real source data removes fabrication; modeled travel time still is not a guarantee.

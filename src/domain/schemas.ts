@@ -109,14 +109,28 @@ const ConditionBaseSchema = z.object({
   visible: z.boolean().default(true),
 });
 
-export const BikeConditionSchema = ConditionBaseSchema.extend({
-  kind: z.literal('bike'),
+export const TRAVEL_MODES = ['bike', 'walk', 'car'] as const;
+export const ACCESS_MODES = ['walk', 'bike'] as const;
+export const PLACE_CATEGORIES = ['grocery', 'school', 'healthcare', 'park', 'cinema'] as const;
+
+export const TravelModeSchema = z.enum(TRAVEL_MODES);
+export type TravelMode = z.infer<typeof TravelModeSchema>;
+export const AccessModeSchema = z.enum(ACCESS_MODES);
+export type AccessMode = z.infer<typeof AccessModeSchema>;
+export const PlaceCategorySchema = z.enum(PLACE_CATEGORIES);
+export type PlaceCategory = z.infer<typeof PlaceCategorySchema>;
+
+export const TravelConditionSchema = ConditionBaseSchema.extend({
+  kind: z.literal('travel'),
+  destinationId: z.string().min(1),
+  mode: TravelModeSchema,
   maxMinutes: z.number().min(5).max(90),
 });
 
 export const AccessConditionSchema = ConditionBaseSchema.extend({
   kind: z.literal('access'),
-  category: z.enum(['grocery', 'park']),
+  category: PlaceCategorySchema,
+  mode: AccessModeSchema,
   maxMinutes: z.number().min(1).max(45),
   groceryType: z.enum(['supermarket', 'supermarket_or_grocery']).optional(),
 });
@@ -127,17 +141,18 @@ export const PreferenceConditionSchema = ConditionBaseSchema.extend({
 });
 
 export const ConditionSchema = z.discriminatedUnion('kind', [
-  BikeConditionSchema,
+  TravelConditionSchema,
   AccessConditionSchema,
   PreferenceConditionSchema,
 ]);
 export type Condition = z.infer<typeof ConditionSchema>;
 
-export const OfficeSchema = z.object({
+export const DestinationSchema = z.object({
+  id: z.string().min(1),
   label: z.string().min(1),
   coordinates: CoordinateSchema,
 });
-export type Office = z.infer<typeof OfficeSchema>;
+export type Destination = z.infer<typeof DestinationSchema>;
 
 export const MapViewSchema = z.object({
   center: CoordinateSchema,
@@ -157,7 +172,7 @@ export type ActivityEntry = z.infer<typeof ActivityEntrySchema>;
 
 export const CanonicalWorkspaceSchema = z
   .object({
-    office: OfficeSchema.nullable(),
+    destinations: z.array(DestinationSchema).max(4),
     conditions: z.array(ConditionSchema).max(20),
     selectedCandidateId: z.string().nullable(),
     removedCandidateIds: z.array(z.string()).max(1_000),
@@ -172,18 +187,26 @@ export const CanonicalWorkspaceSchema = z
         message: 'At least two conditions are required for a combined analysis.',
       });
     }
-    const identities = workspace.conditions.map((condition) =>
-      condition.kind === 'access' ? `access:${condition.category}` : condition.kind,
-    );
-    if (new Set(identities).size !== identities.length) {
-      context.addIssue({
-        code: 'custom',
-        path: ['conditions'],
-        message: 'Only one condition of each type can be active at a time.',
-      });
+    const destinationIds = new Set(workspace.destinations.map(({ id }) => id));
+    for (const [index, condition] of workspace.conditions.entries()) {
+      if (condition.kind === 'travel' && !destinationIds.has(condition.destinationId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['conditions', index, 'destinationId'],
+          message: 'Travel conditions must reference a current destination.',
+        });
+      }
     }
   });
 export type CanonicalWorkspace = z.infer<typeof CanonicalWorkspaceSchema>;
+
+export interface CandidateMetric {
+  conditionId: string;
+  label: string;
+  minutes: number;
+  nearestPlaceName: string | null;
+  slack: number;
+}
 
 export interface Candidate {
   id: string;
@@ -192,11 +215,7 @@ export interface Candidate {
   score: number;
   minimumSlack: number;
   averageSlack: number;
-  bikeMinutes: number | null;
-  groceryMinutes: number | null;
-  parkMinutes: number | null;
-  nearestGrocery: string | null;
-  nearestPark: string | null;
+  metrics: CandidateMetric[];
   comfortable: string[];
   closeToFailing: string | null;
   tradeoff: string;
@@ -233,17 +252,39 @@ export type OperationState = 'idle' | 'calculating' | 'drawing' | 'error';
 export type AnalysisFreshness = 'not-combined' | 'fresh' | 'stale';
 
 export type WorkspaceCommand =
-  | { type: 'set-office'; office: Office; actor?: ActivityEntry['actor'] }
-  | { type: 'add-bike'; maxMinutes: number; actor?: ActivityEntry['actor'] }
   | {
-      type: 'add-access';
-      category: 'grocery' | 'park';
+      type: 'add-destination';
+      destination: Omit<Destination, 'id'> & { id?: string };
+      actor?: ActivityEntry['actor'];
+    }
+  | { type: 'update-destination'; destination: Destination; actor?: ActivityEntry['actor'] }
+  | { type: 'remove-destination'; id: string; actor?: ActivityEntry['actor'] }
+  | {
+      type: 'add-travel';
+      destinationId: string;
+      mode: TravelMode;
+      maxMinutes: number;
+      actor?: ActivityEntry['actor'];
+    }
+  | {
+      type: 'add-place';
+      category: PlaceCategory;
+      mode: AccessMode;
       maxMinutes: number;
       groceryType?: 'supermarket' | 'supermarket_or_grocery';
       actor?: ActivityEntry['actor'];
     }
   | { type: 'add-preference'; geometry: AreaGeometry; actor?: ActivityEntry['actor'] }
-  | { type: 'update-condition'; id: string; maxMinutes: number; actor?: ActivityEntry['actor'] }
+  | {
+      type: 'update-condition';
+      id: string;
+      maxMinutes?: number;
+      destinationId?: string;
+      mode?: TravelMode;
+      category?: PlaceCategory;
+      groceryType?: 'supermarket' | 'supermarket_or_grocery';
+      actor?: ActivityEntry['actor'];
+    }
   | { type: 'delete-condition'; id: string; actor?: ActivityEntry['actor'] }
   | { type: 'set-visibility'; id: string; visible: boolean; actor?: ActivityEntry['actor'] }
   | { type: 'combine'; actor?: ActivityEntry['actor'] }
@@ -258,7 +299,7 @@ export type WorkspaceCommand =
 export type WorkspaceQuery =
   | { type: 'get-workspace' }
   | { type: 'search-locations'; query: string }
-  | { type: 'explain-candidate'; id: string }
+  | { type: 'explain-area'; id: string }
   | { type: 'analyze-restriction' }
   | { type: 'create-share-link' };
 

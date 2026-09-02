@@ -1,7 +1,10 @@
 import { DATASET_VERSION, EMPTY_DERIVED, emptyCanonical } from './defaults';
 import { CITIES, DEFAULT_CITY_ID, coordinateIsInCity, type CityId } from './cities';
 import {
+  ACCESS_MODES,
   CanonicalWorkspaceSchema,
+  PLACE_CATEGORIES,
+  TRAVEL_MODES,
   type ActivityEntry,
   type CanonicalWorkspace,
   type CommandResult,
@@ -9,6 +12,7 @@ import {
   type WorkspaceCommand,
   type WorkspaceQuery,
 } from './schemas';
+import { placeConditionLabel, travelConditionLabel } from './options';
 import { getGeoWorker } from '../geo-worker/client';
 import {
   clearLocalWorkspace,
@@ -35,16 +39,20 @@ function withActivity(entries: ActivityEntry[], entry: ActivityEntry): ActivityE
 
 function commandMessage(command: WorkspaceCommand): string {
   switch (command.type) {
-    case 'set-office':
-      return `Set the destination to ${command.office.label}.`;
-    case 'add-bike':
-      return `Created a ${command.maxMinutes}-minute bicycle area.`;
-    case 'add-access':
-      return `Added ${command.maxMinutes}-minute ${command.category} access.`;
+    case 'add-destination':
+      return `Added ${command.destination.label} as a destination.`;
+    case 'update-destination':
+      return `Moved ${command.destination.label}.`;
+    case 'remove-destination':
+      return 'Removed a destination and its travel priorities.';
+    case 'add-travel':
+      return `Added a ${command.maxMinutes}-minute ${command.mode} travel priority.`;
+    case 'add-place':
+      return `Added ${command.maxMinutes}-minute ${command.mode} access to ${command.category}.`;
     case 'add-preference':
       return 'Added the area you would personally consider.';
     case 'update-condition':
-      return `Changed a time limit to ${command.maxMinutes} minutes.`;
+      return 'Updated a priority.';
     case 'delete-condition':
       return 'Removed a priority.';
     case 'set-visibility':
@@ -319,6 +327,7 @@ export class WorkspaceService {
         operation: 'idle',
         analysisFreshness: 'not-combined',
         error: null,
+        activeAgentAction: null,
         workspaceEpoch: state.workspaceEpoch + 1,
       });
       if (window.location.hash)
@@ -335,46 +344,103 @@ export class WorkspaceService {
     try {
       throwIfAborted(signal);
       switch (command.type) {
-        case 'set-office':
-          if (!coordinateIsInCity(state.cityId, command.office.coordinates)) {
+        case 'add-destination': {
+          if (canonical.destinations.length >= 4) {
+            throw new Error('A workspace can contain up to four destinations.');
+          }
+          if (!coordinateIsInCity(state.cityId, command.destination.coordinates)) {
             throw new Error(
               `Choose a location inside the supported ${CITIES[state.cityId].name} area.`,
             );
           }
-          if (!(await getGeoWorker().isCoordinateSupported(command.office.coordinates))) {
+          if (!(await getGeoWorker().isCoordinateSupported(command.destination.coordinates))) {
             throw new Error(
               `Choose a location inside the supported ${CITIES[state.cityId].name} map boundary.`,
             );
           }
           throwIfAborted(signal);
-          canonical.office = command.office;
+          canonical.destinations.push({
+            ...command.destination,
+            id: command.destination.id ?? id('destination'),
+          });
           canonical.selectedCandidateId = null;
-          if (canonical.combined && canonical.conditions.some(({ kind }) => kind === 'bike')) {
+          needsAnalysis = false;
+          break;
+        }
+        case 'update-destination': {
+          const destinationIndex = canonical.destinations.findIndex(
+            ({ id: destinationId }) => destinationId === command.destination.id,
+          );
+          if (destinationIndex < 0) throw new Error('Destination not found.');
+          if (!coordinateIsInCity(state.cityId, command.destination.coordinates)) {
+            throw new Error(
+              `Choose a location inside the supported ${CITIES[state.cityId].name} area.`,
+            );
+          }
+          if (!(await getGeoWorker().isCoordinateSupported(command.destination.coordinates))) {
+            throw new Error(
+              `Choose a location inside the supported ${CITIES[state.cityId].name} map boundary.`,
+            );
+          }
+          throwIfAborted(signal);
+          canonical.destinations[destinationIndex] = command.destination;
+          canonical.selectedCandidateId = null;
+          const isTravelDestination = canonical.conditions.some(
+            (condition) =>
+              condition.kind === 'travel' && condition.destinationId === command.destination.id,
+          );
+          if (canonical.combined && isTravelDestination) {
             freshness = 'stale';
+            needsAnalysis = false;
+          } else if (!isTravelDestination) {
             needsAnalysis = false;
           }
           break;
-        case 'add-bike':
-          if (!canonical.office)
-            throw new Error('Set an office before adding a bicycle condition.');
-          canonical.conditions = canonical.conditions.filter(({ kind }) => kind !== 'bike');
+        }
+        case 'remove-destination': {
+          if (
+            !canonical.destinations.some(({ id: destinationId }) => destinationId === command.id)
+          ) {
+            throw new Error('Destination not found.');
+          }
+          canonical.destinations = canonical.destinations.filter(
+            ({ id: destinationId }) => destinationId !== command.id,
+          );
+          const conditionCount = canonical.conditions.length;
+          canonical.conditions = canonical.conditions.filter(
+            (condition) => condition.kind !== 'travel' || condition.destinationId !== command.id,
+          );
+          if (canonical.conditions.length < 2) canonical.combined = false;
+          if (conditionCount === canonical.conditions.length) needsAnalysis = false;
+          break;
+        }
+        case 'add-travel': {
+          const destination = canonical.destinations.find(({ id }) => id === command.destinationId);
+          if (!destination)
+            throw new Error('Choose a current destination for this travel priority.');
           canonical.conditions.push({
-            id: id('bike'),
-            kind: 'bike',
-            label: `${command.maxMinutes}-minute bicycle area`,
+            id: id('travel'),
+            kind: 'travel',
+            destinationId: command.destinationId,
+            mode: command.mode,
+            label: travelConditionLabel(command.maxMinutes, command.mode, destination.label),
             visible: true,
             maxMinutes: command.maxMinutes,
           });
           break;
-        case 'add-access':
-          canonical.conditions = canonical.conditions.filter(
-            (condition) => condition.kind !== 'access' || condition.category !== command.category,
-          );
+        }
+        case 'add-place':
           canonical.conditions.push({
             id: id(command.category),
             kind: 'access',
             category: command.category,
-            label: `${command.maxMinutes}-minute ${command.category} access`,
+            mode: command.mode,
+            label: placeConditionLabel(
+              command.maxMinutes,
+              command.mode,
+              command.category,
+              command.groceryType,
+            ),
             visible: true,
             maxMinutes: command.maxMinutes,
             groceryType: command.groceryType,
@@ -395,10 +461,49 @@ export class WorkspaceService {
             ({ id: conditionId }) => conditionId === command.id,
           );
           if (!target || target.kind === 'preference')
-            throw new Error('That condition cannot be updated with a time limit.');
-          target.maxMinutes = command.maxMinutes;
-          target.label = `${command.maxMinutes}-minute ${target.kind === 'bike' ? 'bicycle area' : `${target.category} access`}`;
-          if (canonical.combined && target.kind === 'bike') {
+            throw new Error('That condition cannot be updated with these fields.');
+          if (
+            command.maxMinutes === undefined &&
+            command.destinationId === undefined &&
+            command.mode === undefined &&
+            command.category === undefined &&
+            command.groceryType === undefined
+          ) {
+            throw new Error('Provide at least one field to update.');
+          }
+          if (command.maxMinutes !== undefined) target.maxMinutes = command.maxMinutes;
+          if (target.kind === 'travel') {
+            if (command.category !== undefined || command.groceryType !== undefined) {
+              throw new Error('Place fields cannot be applied to a travel priority.');
+            }
+            if (command.destinationId !== undefined) {
+              if (!canonical.destinations.some(({ id }) => id === command.destinationId)) {
+                throw new Error('Choose a current destination for this travel priority.');
+              }
+              target.destinationId = command.destinationId;
+            }
+            if (command.mode !== undefined) target.mode = command.mode;
+            const destination = canonical.destinations.find(
+              ({ id }) => id === target.destinationId,
+            );
+            if (!destination) throw new Error('Destination not found.');
+            target.label = travelConditionLabel(target.maxMinutes, target.mode, destination.label);
+          } else {
+            if (command.destinationId !== undefined || command.mode === 'car') {
+              throw new Error('Travel-only fields cannot be applied to a place priority.');
+            }
+            if (command.category !== undefined) target.category = command.category;
+            if (command.mode !== undefined) target.mode = command.mode;
+            if (command.groceryType !== undefined) target.groceryType = command.groceryType;
+            if (target.category !== 'grocery') target.groceryType = undefined;
+            target.label = placeConditionLabel(
+              target.maxMinutes,
+              target.mode,
+              target.category,
+              target.groceryType,
+            );
+          }
+          if (canonical.combined && target.kind === 'travel') {
             freshness = 'stale';
             needsAnalysis = false;
           }
@@ -516,28 +621,33 @@ export class WorkspaceService {
           message: 'Workspace summary.',
           data: {
             city: CITIES[state.cityId].name,
-            office: state.canonical.office,
-            conditions: state.canonical.conditions.map(({ id, label, kind, visible }) => ({
-              id,
-              label,
-              kind,
-              visible,
-            })),
+            destinations: state.canonical.destinations,
+            conditions: state.canonical.conditions.map((condition) =>
+              condition.kind === 'preference'
+                ? {
+                    id: condition.id,
+                    label: condition.label,
+                    kind: condition.kind,
+                    visible: condition.visible,
+                  }
+                : condition,
+            ),
             feasibleAreaKm2: state.derived.feasibleAreaKm2,
             candidates: state.derived.candidates,
             freshness: state.analysisFreshness,
             supportedAnalysis: {
-              commuteModes: ['bicycle'],
-              nearbyCategories: ['grocery', 'park'],
+              commuteModes: [...TRAVEL_MODES],
+              nearbyModes: [...ACCESS_MODES],
+              nearbyCategories: [...PLACE_CATEGORIES],
               unsupported: [
-                'schools',
-                'straight-line distance limits',
                 'public transit',
-                'driving',
+                'straight-line distance limits',
+                'exclusion zones',
                 'housing listings',
+                'live traffic',
               ],
               instruction:
-                'Only claim constraints represented by the current office, conditions, and candidate metrics. Ask the user before choosing among ambiguous location matches, and disclose unsupported constraints.',
+                'Only claim constraints represented by the current destinations, conditions, and candidate metrics. Ask the user before choosing among ambiguous location matches. Convert distance requests such as within 5 km to travel minutes and say that you did so. Disclose unsupported constraints.',
             },
           },
         };
@@ -550,11 +660,11 @@ export class WorkspaceService {
               ? 'No supported location matched. Do not guess coordinates; ask for a more specific company name, address, street, or landmark.'
               : matches.length === 1
                 ? 'One location matched.'
-                : 'Multiple locations matched. Ask the user which result they mean before setting the office.',
+                : 'Multiple locations matched. Ask the user which result they mean before adding a destination.',
           data: matches,
         };
       }
-      case 'explain-candidate': {
+      case 'explain-area': {
         const candidate = state.derived.candidates.find(
           ({ id: candidateId }) => candidateId === query.id,
         );

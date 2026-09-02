@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
+import area from '@turf/area';
+import intersect from '@turf/intersect';
 import { point } from '@turf/helpers';
+import { featureCollection } from '@turf/helpers';
 import type { AreaGeometry, CanonicalWorkspace } from '../domain/schemas';
 import { GeoEngine } from './engine';
 import { loadGraph, type CompactGraphSpec } from './graph';
@@ -35,27 +38,41 @@ const boundary: AreaGeometry = {
 };
 
 const places = {
-  groceries: [
-    {
-      id: 'g1',
-      name: 'Supermarket',
-      coordinates: [-122.415, 37.765] as [number, number],
-      type: 'supermarket' as const,
-    },
-  ],
-  parks: [{ id: 'p1', name: 'Park', coordinates: [-122.42, 37.77] as [number, number] }],
+  categories: {
+    grocery: [
+      {
+        id: 'g1',
+        name: 'Supermarket',
+        coordinates: [-122.415, 37.765] as [number, number],
+        type: 'supermarket' as const,
+      },
+    ],
+    school: [{ id: 's1', name: 'School', coordinates: [-122.425, 37.77] as [number, number] }],
+    healthcare: [{ id: 'h1', name: 'Clinic', coordinates: [-122.42, 37.765] as [number, number] }],
+    park: [{ id: 'p1', name: 'Park', coordinates: [-122.42, 37.77] as [number, number] }],
+    cinema: [{ id: 'c1', name: 'Cinema', coordinates: [-122.41, 37.77] as [number, number] }],
+  },
   search: [],
 };
 
 function workspace(): CanonicalWorkspace {
   return {
-    office: { label: 'Office', coordinates: [-122.4, 37.79] },
+    destinations: [{ id: 'office', label: 'Office', coordinates: [-122.4, 37.79] }],
     conditions: [
-      { id: 'bike', kind: 'bike', label: '25-minute bicycle area', visible: true, maxMinutes: 25 },
+      {
+        id: 'bike',
+        kind: 'travel',
+        destinationId: 'office',
+        mode: 'bike',
+        label: '25-minute bike ride to Office',
+        visible: true,
+        maxMinutes: 25,
+      },
       {
         id: 'grocery',
         kind: 'access',
         category: 'grocery',
+        mode: 'walk',
         label: '10-minute grocery access',
         visible: true,
         maxMinutes: 10,
@@ -65,6 +82,7 @@ function workspace(): CanonicalWorkspace {
         id: 'park',
         kind: 'access',
         category: 'park',
+        mode: 'walk',
         label: '8-minute park access',
         visible: true,
         maxMinutes: 8,
@@ -97,6 +115,81 @@ describe('GeoEngine', () => {
     expect(result.candidates.length).toBeLessThanOrEqual(3);
   });
 
+  it('keeps two conditions of the same category in the feasible analysis and metrics', () => {
+    const twoSchools = workspace();
+    twoSchools.conditions = [
+      {
+        id: 'school-near',
+        kind: 'access',
+        category: 'school',
+        mode: 'walk',
+        label: '10-minute walk to schools',
+        visible: true,
+        maxMinutes: 10,
+      },
+      {
+        id: 'school-wide',
+        kind: 'access',
+        category: 'school',
+        mode: 'bike',
+        label: '20-minute bike ride to schools',
+        visible: true,
+        maxMinutes: 20,
+      },
+    ];
+    const result = new GeoEngine(loadGraph(graph), places, boundary).analyze(twoSchools);
+
+    expect(Object.keys(result.layers)).toEqual(['school-near', 'school-wide']);
+    expect(result.feasibleRegion).not.toBeNull();
+    for (const candidate of result.candidates) {
+      expect(candidate.metrics.map(({ conditionId }) => conditionId)).toEqual([
+        'school-near',
+        'school-wide',
+      ]);
+    }
+  });
+
+  it('intersects travel areas from two destinations', () => {
+    const twoDestinations = workspace();
+    twoDestinations.destinations = [
+      { id: 'north', label: 'North', coordinates: [-122.4, 37.79] },
+      { id: 'south', label: 'South', coordinates: [-122.44, 37.74] },
+    ];
+    twoDestinations.conditions = [
+      {
+        id: 'north-trip',
+        kind: 'travel',
+        destinationId: 'north',
+        mode: 'car',
+        label: '20-minute drive to North',
+        visible: true,
+        maxMinutes: 20,
+      },
+      {
+        id: 'south-trip',
+        kind: 'travel',
+        destinationId: 'south',
+        mode: 'bike',
+        label: '20-minute bike ride to South',
+        visible: true,
+        maxMinutes: 20,
+      },
+    ];
+    const result = new GeoEngine(loadGraph(graph), places, boundary).analyze(twoDestinations);
+    const northLayer = result.layers['north-trip'];
+    const southLayer = result.layers['south-trip'];
+
+    expect(northLayer).toBeDefined();
+    expect(southLayer).toBeDefined();
+    if (!northLayer || !southLayer) return;
+    const expected = intersect(featureCollection([northLayer, southLayer]));
+    expect(result.feasibleRegion).not.toBeNull();
+    expect(result.feasibleRegion ? area(result.feasibleRegion) : 0).toBeCloseTo(
+      expected ? area(expected) : 0,
+      4,
+    );
+  });
+
   it('honors removed candidates on the next ranking pass', () => {
     const engine = new GeoEngine(loadGraph(graph), places, boundary);
     const first = engine.analyze(workspace());
@@ -110,14 +203,17 @@ describe('GeoEngine', () => {
   it('fails closed when any hard condition cannot produce a layer', () => {
     const noSupermarkets = {
       ...places,
-      groceries: [
-        {
-          id: 'grocery-only',
-          name: 'Small grocery',
-          coordinates: [-122.415, 37.765] as [number, number],
-          type: 'grocery' as const,
-        },
-      ],
+      categories: {
+        ...places.categories,
+        grocery: [
+          {
+            id: 'grocery-only',
+            name: 'Small grocery',
+            coordinates: [-122.415, 37.765] as [number, number],
+            type: 'grocery' as const,
+          },
+        ],
+      },
     };
     const result = new GeoEngine(loadGraph(graph), noSupermarkets, boundary).analyze(workspace());
 
@@ -133,21 +229,30 @@ describe('GeoEngine', () => {
       loadGraph(graph),
       {
         ...places,
-        groceries: [
-          ...places.groceries,
-          {
-            id: 'g2',
-            name: 'Nearby grocery',
-            coordinates: [-122.42, 37.77] as [number, number],
-            type: 'grocery' as const,
-          },
-        ],
+        categories: {
+          ...places.categories,
+          grocery: [
+            ...places.categories.grocery,
+            {
+              id: 'g2',
+              name: 'Nearby grocery',
+              coordinates: [-122.42, 37.77] as [number, number],
+              type: 'grocery' as const,
+            },
+          ],
+        },
       },
       boundary,
     ).analyze(workspace());
 
-    expect(withNearbyGrocery.candidates.map(({ groceryMinutes }) => groceryMinutes)).toEqual(
-      baseline.candidates.map(({ groceryMinutes }) => groceryMinutes),
+    expect(
+      withNearbyGrocery.candidates.map((candidate) =>
+        candidate.metrics.find(({ conditionId }) => conditionId === 'grocery'),
+      ),
+    ).toEqual(
+      baseline.candidates.map((candidate) =>
+        candidate.metrics.find(({ conditionId }) => conditionId === 'grocery'),
+      ),
     );
   });
 
@@ -180,6 +285,7 @@ describe('GeoEngine', () => {
         id: 'park',
         kind: 'access',
         category: 'park',
+        mode: 'walk',
         label: '45-minute park access',
         visible: true,
         maxMinutes: 45,

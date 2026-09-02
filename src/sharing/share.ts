@@ -5,7 +5,7 @@ import { WorkspaceShareSchema } from '../domain/schemas';
 
 export const MAX_SHARE_LENGTH = 8_192;
 export const MAX_DECOMPRESSED_SHARE_BYTES = 256_000;
-export const STORAGE_KEY = 'groundwork:workspace:v1';
+export const STORAGE_KEY = 'sweetspot:workspace:v1';
 
 function toBase64Url(bytes: Uint8Array): string {
   let binary = '';
@@ -94,7 +94,9 @@ export function readLocalWorkspace(): WorkspaceShare | null {
     return WorkspaceShareSchema.parse(JSON.parse(raw));
   } catch {
     localStorage.removeItem(STORAGE_KEY);
-    return null;
+    throw new Error(
+      'The saved workspace was created by an unsupported version and was not restored.',
+    );
   }
 }
 
