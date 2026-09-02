@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_CANONICAL, EMPTY_DERIVED, SAMPLE_OFFICE } from './defaults';
 import type { CanonicalWorkspace, DerivedAnalysis } from './schemas';
-import { STORAGE_KEY } from '../sharing/share';
+import { decodeWorkspace, STORAGE_KEY } from '../sharing/share';
 import { useWorkspaceStore } from '../store/workspace-store';
 import { CITIES } from './cities';
 
 const worker = vi.hoisted(() => ({
   initialize: vi.fn(),
+  isCoordinateSupported: vi.fn(),
   analyze: vi.fn(),
 }));
 
@@ -92,9 +93,15 @@ describe('WorkspaceService', () => {
     worker.initialize.mockReset().mockResolvedValue({
       metadata: { datasetVersion: 'test-dataset' },
       search: [
-        { id: 'market-1', label: SAMPLE_OFFICE.label, coordinates: SAMPLE_OFFICE.coordinates },
+        {
+          id: 'market-1',
+          label: SAMPLE_OFFICE.label,
+          coordinates: SAMPLE_OFFICE.coordinates,
+          kind: 'poi',
+        },
       ],
     });
+    worker.isCoordinateSupported.mockReset().mockResolvedValue(true);
     worker.analyze
       .mockReset()
       .mockImplementation(async (canonical: CanonicalWorkspace) => analysisFor(canonical));
@@ -104,7 +111,12 @@ describe('WorkspaceService', () => {
     await workspaceService.initialize();
     const search = await workspaceService.query({ type: 'search-locations', query: 'City Hall' });
     expect(search.data).toEqual([
-      { id: 'market-1', label: SAMPLE_OFFICE.label, coordinates: SAMPLE_OFFICE.coordinates },
+      {
+        id: 'market-1',
+        label: SAMPLE_OFFICE.label,
+        coordinates: SAMPLE_OFFICE.coordinates,
+        kind: 'poi',
+      },
     ]);
 
     await workspaceService.execute({ type: 'set-office', office: SAMPLE_OFFICE, actor: 'agent' });
@@ -178,6 +190,7 @@ describe('WorkspaceService', () => {
 
     await workspaceService.execute({ type: 'update-condition', id: bikeId, maxMinutes: 30 });
     expect(useWorkspaceStore.getState().analysisFreshness).toBe('stale');
+    expect(useWorkspaceStore.getState().derived).toEqual(EMPTY_DERIVED);
     expect(worker.analyze).toHaveBeenCalledTimes(analyzeCount);
 
     await workspaceService.execute({ type: 'recalculate' });
@@ -268,5 +281,37 @@ describe('WorkspaceService', () => {
       workspaceService.execute({ type: 'remove-candidate', id: 'missing' }),
     ).resolves.toMatchObject({ ok: false, message: 'Candidate not found.' });
     expect(useWorkspaceStore.getState().undo).toEqual(undoBefore);
+  });
+
+  it('does not commit an analysis after its caller cancels', async () => {
+    await workspaceService.initialize();
+    await workspaceService.execute({ type: 'set-office', office: SAMPLE_OFFICE });
+    let resolveAnalysis!: (analysis: DerivedAnalysis) => void;
+    worker.analyze.mockImplementationOnce(
+      () => new Promise<DerivedAnalysis>((resolve) => (resolveAnalysis = resolve)),
+    );
+    const controller = new AbortController();
+    const pending = workspaceService.execute(
+      { type: 'add-bike', maxMinutes: 25, actor: 'agent' },
+      controller.signal,
+    );
+
+    controller.abort();
+    resolveAnalysis(analysisFor(useWorkspaceStore.getState().canonical));
+    await expect(pending).resolves.toEqual({ ok: false, message: 'The operation was cancelled.' });
+    expect(useWorkspaceStore.getState().canonical.conditions).toHaveLength(0);
+    expect(useWorkspaceStore.getState().operation).toBe('idle');
+  });
+
+  it('creates share links without private history or an undo snapshot', async () => {
+    await workspaceService.initialize();
+    await workspaceService.execute({ type: 'set-office', office: SAMPLE_OFFICE });
+    const result = await workspaceService.query({ type: 'create-share-link' });
+    const url = new URL((result.data as { url: string }).url);
+    const shared = decodeWorkspace(new URLSearchParams(url.hash.slice(1)).get('w')!);
+
+    expect(shared.activity).toEqual([]);
+    expect(shared.undo).toBeNull();
+    expect(shared.canonical.office).toEqual(SAMPLE_OFFICE);
   });
 });

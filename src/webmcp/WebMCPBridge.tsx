@@ -38,7 +38,12 @@ async function safeToolResult<T>(operation: () => Promise<T> | T) {
   } catch (error) {
     return {
       ok: false,
-      message: error instanceof z.ZodError ? 'Invalid tool input.' : 'The tool could not complete.',
+      message:
+        error instanceof z.ZodError
+          ? 'Invalid tool input.'
+          : error instanceof Error && /cancel/i.test(error.message)
+            ? 'The operation was cancelled.'
+            : 'The tool could not complete.',
     };
   }
 }
@@ -50,12 +55,21 @@ export function WebMCPBridge() {
   const hasUndo = useWorkspaceStore((state) => Boolean(state.undo));
   const initialized = useWorkspaceStore((state) => state.initialized);
   const cityId = useWorkspaceStore((state) => state.cityId);
+  const operation = useWorkspaceStore((state) => state.operation);
+  const drawingReady = useWorkspaceStore((state) => state.drawingReady);
   const city = CITIES[cityId];
   const registrations = useRef(new Map<Capability, AbortController>());
 
   useEffect(() => {
     if (!document.modelContext || !initialized) return;
-    const capabilities = getCapabilities(canonical, derived, freshness, hasUndo);
+    const capabilities = getCapabilities(
+      canonical,
+      derived,
+      freshness,
+      hasUndo,
+      operation,
+      drawingReady,
+    );
     const register = (
       capability: Parameters<typeof capabilities.has>[0],
       tool: WebMCP.ModelContextTool,
@@ -98,16 +112,19 @@ export function WebMCPBridge() {
         { label: { type: 'string' }, longitude: { type: 'number' }, latitude: { type: 'number' } },
         ['label', 'longitude', 'latitude'],
       ),
-      execute: (input) =>
+      execute: (input, { signal }) =>
         safeToolResult(() =>
-          workspaceService.execute({
-            type: 'set-office',
-            actor: 'agent',
-            office: {
-              label: z.string().min(1).parse(input.label),
-              coordinates: CoordinateSchema.parse([input.longitude, input.latitude]),
+          workspaceService.execute(
+            {
+              type: 'set-office',
+              actor: 'agent',
+              office: {
+                label: z.string().min(1).parse(input.label),
+                coordinates: CoordinateSchema.parse([input.longitude, input.latitude]),
+              },
             },
-          }),
+            signal,
+          ),
         ),
     });
     register('add-bike', {
@@ -115,13 +132,16 @@ export function WebMCPBridge() {
       title: 'Add bicycle condition',
       description: 'Create a deterministic bicycle travel area from the current office.',
       inputSchema: objectSchema({ maxMinutes: bikeMinutesProperty }, ['maxMinutes']),
-      execute: (input) =>
+      execute: (input, { signal }) =>
         safeToolResult(() =>
-          workspaceService.execute({
-            type: 'add-bike',
-            maxMinutes: z.number().min(5).max(90).parse(input.maxMinutes),
-            actor: 'agent',
-          }),
+          workspaceService.execute(
+            {
+              type: 'add-bike',
+              maxMinutes: z.number().min(5).max(90).parse(input.maxMinutes),
+              actor: 'agent',
+            },
+            signal,
+          ),
         ),
     });
     register('add-access', {
@@ -136,17 +156,20 @@ export function WebMCPBridge() {
         },
         ['category', 'maxMinutes'],
       ),
-      execute: (input) =>
+      execute: (input, { signal }) =>
         safeToolResult(() =>
-          workspaceService.execute({
-            type: 'add-access',
-            actor: 'agent',
-            category: z.enum(['grocery', 'park']).parse(input.category),
-            maxMinutes: z.number().min(1).max(45).parse(input.maxMinutes),
-            groceryType: input.groceryType
-              ? z.enum(['supermarket', 'supermarket_or_grocery']).parse(input.groceryType)
-              : undefined,
-          }),
+          workspaceService.execute(
+            {
+              type: 'add-access',
+              actor: 'agent',
+              category: z.enum(['grocery', 'park']).parse(input.category),
+              maxMinutes: z.number().min(1).max(45).parse(input.maxMinutes),
+              groceryType: input.groceryType
+                ? z.enum(['supermarket', 'supermarket_or_grocery']).parse(input.groceryType)
+                : undefined,
+            },
+            signal,
+          ),
         ),
     });
     register('start-draw', {
@@ -155,12 +178,14 @@ export function WebMCPBridge() {
       description:
         'Put the live map into polygon drawing mode and wait for the user to draw the area they would consider.',
       execute: async (_input, { signal }) => {
-        const geometry = await requestPreferenceDraw(signal);
-        return {
-          ok: true,
-          message: 'The user preference area was added.',
-          data: { geometryType: geometry.geometry.type },
-        };
+        return safeToolResult(async () => {
+          const geometry = await requestPreferenceDraw(signal);
+          const result = await workspaceService.execute(
+            { type: 'add-preference', geometry, actor: 'agent' },
+            signal,
+          );
+          return result.ok ? { ...result, data: { geometryType: geometry.geometry.type } } : result;
+        });
       },
     });
     register('update-condition', {
@@ -172,14 +197,17 @@ export function WebMCPBridge() {
         'id',
         'maxMinutes',
       ]),
-      execute: (input) =>
+      execute: (input, { signal }) =>
         safeToolResult(() =>
-          workspaceService.execute({
-            type: 'update-condition',
-            actor: 'agent',
-            id: z.string().min(1).parse(input.id),
-            maxMinutes: z.number().min(1).max(90).parse(input.maxMinutes),
-          }),
+          workspaceService.execute(
+            {
+              type: 'update-condition',
+              actor: 'agent',
+              id: z.string().min(1).parse(input.id),
+              maxMinutes: z.number().min(1).max(90).parse(input.maxMinutes),
+            },
+            signal,
+          ),
         ),
     });
     register('delete-condition', {
@@ -187,13 +215,16 @@ export function WebMCPBridge() {
       title: 'Delete condition',
       description: 'Delete one condition from the analysis by ID.',
       inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
-      execute: (input) =>
+      execute: (input, { signal }) =>
         safeToolResult(() =>
-          workspaceService.execute({
-            type: 'delete-condition',
-            id: z.string().min(1).parse(input.id),
-            actor: 'agent',
-          }),
+          workspaceService.execute(
+            {
+              type: 'delete-condition',
+              id: z.string().min(1).parse(input.id),
+              actor: 'agent',
+            },
+            signal,
+          ),
         ),
     });
     register('set-visibility', {
@@ -204,34 +235,40 @@ export function WebMCPBridge() {
         'id',
         'visible',
       ]),
-      execute: (input) =>
+      execute: (input, { signal }) =>
         safeToolResult(() =>
-          workspaceService.execute({
-            type: 'set-visibility',
-            actor: 'agent',
-            id: z.string().min(1).parse(input.id),
-            visible: z.boolean().parse(input.visible),
-          }),
+          workspaceService.execute(
+            {
+              type: 'set-visibility',
+              actor: 'agent',
+              id: z.string().min(1).parse(input.id),
+              visible: z.boolean().parse(input.visible),
+            },
+            signal,
+          ),
         ),
     });
     register('combine', {
       name: 'groundwork_combine_conditions',
       title: 'Combine conditions',
       description: 'Intersect all current conditions to create the feasible region.',
-      execute: () => workspaceService.execute({ type: 'combine', actor: 'agent' }),
+      execute: (_input, { signal }) =>
+        workspaceService.execute({ type: 'combine', actor: 'agent' }, signal),
     });
     register('recalculate', {
       name: 'groundwork_recalculate',
       title: 'Recalculate analysis',
       description:
         'Refresh stale network-dependent results after the office or bicycle limit changes.',
-      execute: () => workspaceService.execute({ type: 'recalculate', actor: 'agent' }),
+      execute: (_input, { signal }) =>
+        workspaceService.execute({ type: 'recalculate', actor: 'agent' }, signal),
     });
     register('rank', {
       name: 'groundwork_rank_candidates',
       title: 'Rank candidates',
       description: 'Rank three balanced candidate areas inside the fresh feasible region.',
-      execute: () => workspaceService.execute({ type: 'rank', actor: 'agent' }),
+      execute: (_input, { signal }) =>
+        workspaceService.execute({ type: 'rank', actor: 'agent' }, signal),
     });
     register('analyze-restriction', {
       name: 'groundwork_analyze_restriction',
@@ -246,13 +283,16 @@ export function WebMCPBridge() {
       title: 'Select candidate',
       description: 'Select a ranked candidate by ID.',
       inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
-      execute: (input) =>
+      execute: (input, { signal }) =>
         safeToolResult(() =>
-          workspaceService.execute({
-            type: 'select-candidate',
-            id: z.string().min(1).parse(input.id),
-            actor: 'agent',
-          }),
+          workspaceService.execute(
+            {
+              type: 'select-candidate',
+              id: z.string().min(1).parse(input.id),
+              actor: 'agent',
+            },
+            signal,
+          ),
         ),
     });
     register('explain-candidate', {
@@ -274,20 +314,24 @@ export function WebMCPBridge() {
       title: 'Remove candidate',
       description: 'Remove a candidate and fill its place with the next-ranked area.',
       inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
-      execute: (input) =>
+      execute: (input, { signal }) =>
         safeToolResult(() =>
-          workspaceService.execute({
-            type: 'remove-candidate',
-            id: z.string().min(1).parse(input.id),
-            actor: 'agent',
-          }),
+          workspaceService.execute(
+            {
+              type: 'remove-candidate',
+              id: z.string().min(1).parse(input.id),
+              actor: 'agent',
+            },
+            signal,
+          ),
         ),
     });
     register('undo', {
       name: 'groundwork_undo',
       title: 'Undo last change',
       description: 'Undo the single most recent meaningful workspace change.',
-      execute: () => workspaceService.execute({ type: 'undo', actor: 'agent' }),
+      execute: (_input, { signal }) =>
+        workspaceService.execute({ type: 'undo', actor: 'agent' }, signal),
     });
     register('create-share-link', {
       name: 'groundwork_create_share_link',
@@ -303,7 +347,7 @@ export function WebMCPBridge() {
         registrations.current.delete(capability);
       }
     }
-  }, [canonical, city.name, derived, freshness, hasUndo, initialized]);
+  }, [canonical, city.name, derived, drawingReady, freshness, hasUndo, initialized, operation]);
 
   useEffect(
     () => () => {

@@ -219,7 +219,7 @@ The Zustand store in [`src/store/workspace-store.ts`](src/store/workspace-store.
 - **Derived state:** recomputable layers, feasible polygon, area, candidate ranking and restriction explanation.
 - **Runtime state:** loading status, errors, activity, undo and freshness.
 
-Only canonical state, activity and undo are saved or shared. Large derived GeoJSON results are recalculated locally. This keeps share links smaller and avoids treating stale calculations as authoritative.
+Local autosave stores canonical state, activity and the one-step undo snapshot. Public share links store only canonical state; activity and undo are deliberately omitted. Large derived GeoJSON results are always recalculated locally. This keeps share links private and compact and avoids treating stale calculations as authoritative.
 
 ### 4. Geographic work runs outside the React thread
 
@@ -227,10 +227,10 @@ Only canonical state, activity and undo are saved or shared. Large derived GeoJS
 
 The worker in [`src/geo-worker/worker.ts`](src/geo-worker/worker.ts) downloads the versioned static dataset and constructs the engine. The algorithm in [`src/geo-worker/engine.ts`](src/geo-worker/engine.ts) then:
 
-1. Runs directional Dijkstra from the office for bicycle reachability.
-2. Runs multi-source walking Dijkstra from every applicable grocery or park.
+1. Reverses the directed bicycle graph and runs Dijkstra from the destination, producing the equivalent travel time from each possible home to that destination.
+2. Runs multi-source walking Dijkstra from every applicable grocery and sampled park-perimeter access point.
 3. Samples reachable street edges and converts them into H3-based polygons.
-4. Clips every condition to the San Francisco boundary.
+4. Clips every condition to the selected city's boundary.
 5. Intersects all condition polygons to make the feasible region.
 6. Generates candidate points inside that region.
 7. Keeps candidates at least 300 metres apart.
@@ -275,30 +275,30 @@ The current bridge registers **18 WebMCP tools**, although the README currently 
 
 ## Network requests
 
-| Request | Origin | Purpose |
-| --- | --- | --- |
-| HTML, JavaScript, CSS and workers | SweetSpot static origin | Load the application |
-| `/data/sf/metadata.json` | Same origin | Discover the exact dataset version and filenames |
-| Five versioned analysis assets | Same origin | Graph, places, boundary, neighborhoods and labels |
-| Map style and tiles | MapTiler or OpenFreeMap | Visual background map only |
-| Workspace commands | None | Direct in-browser function calls |
-| Geographic analysis | None | Worker messages inside the browser |
-| Location search | None | Search of the downloaded OSM index |
-| Autosave | None | `localStorage` |
-| Sharing | None when created | Compressed state stored in the URL fragment |
+| Request                           | Origin                  | Purpose                                           |
+| --------------------------------- | ----------------------- | ------------------------------------------------- |
+| HTML, JavaScript, CSS and workers | SweetSpot static origin | Load the application                              |
+| `/data/sf/metadata.json`          | Same origin             | Discover the exact dataset version and filenames  |
+| Five versioned analysis assets    | Same origin             | Graph, places, boundary, neighborhoods and labels |
+| Map style and tiles               | MapTiler or OpenFreeMap | Visual background map only                        |
+| Workspace commands                | None                    | Direct in-browser function calls                  |
+| Geographic analysis               | None                    | Worker messages inside the browser                |
+| Location search                   | None                    | Search of the downloaded OSM index                |
+| Autosave                          | None                    | `localStorage`                                    |
+| Sharing                           | None when created       | Compressed state stored in the URL fragment       |
 
 A URL fragment such as `#w=...` is not sent to the web server during an HTTP request. However, it contains the workspace data, so anyone receiving the link can decode and open that workspace.
 
 ## Supported clients
 
-| Client | Support |
-| --- | --- |
-| Modern desktop browser | Full manual workspace |
-| Responsive or mobile browser | Layout is designed for smaller screens, although automated E2E coverage currently targets desktop Chromium |
-| Browser without WebMCP | Manual mode; all normal UI features remain available |
-| WebMCP-capable browser assistant | Manual UI plus dynamically registered agent tools |
-| Recipient of a share link | Can restore the workspace if its dataset version matches |
-| Server-side API client, CLI or native app | Not directly supported; there is no public HTTP analysis API |
-| Fully offline fresh browser | Not guaranteed; the application and dataset must first be obtained from the static origin, and base-map tiles require network access |
+| Client                                    | Support                                                                                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Modern desktop browser                    | Full manual workspace                                                                                                                |
+| Responsive or mobile browser              | Layout is designed for smaller screens, although automated E2E coverage currently targets desktop Chromium                           |
+| Browser without WebMCP                    | Manual mode; all normal UI features remain available                                                                                 |
+| WebMCP-capable browser assistant          | Manual UI plus dynamically registered agent tools                                                                                    |
+| Recipient of a share link                 | Can restore the workspace if its dataset version matches                                                                             |
+| Server-side API client, CLI or native app | Not directly supported; there is no public HTTP analysis API                                                                         |
+| Fully offline fresh browser               | Not guaranteed; the application and dataset must first be obtained from the static origin, and base-map tiles require network access |
 
 Production WebMCP additionally requires the correct origin-trial token and `Permissions-Policy` headers configured through [`vite.config.ts`](vite.config.ts) and [`vercel.json`](vercel.json).

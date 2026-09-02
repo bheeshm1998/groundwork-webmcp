@@ -1,17 +1,17 @@
 {
-  "datasetVersion": "sf-osm-datasf-2026-09-01-v2",
-  "generatedAt": "2026-09-01T12:47:40.091Z",
+  "datasetVersion": "sf-osm-datasf-2026-09-02-v2",
+  "generatedAt": "2026-09-02T11:43:44.669Z",
   "coverage": "City and County of San Francisco, California",
   "attribution": "© OpenStreetMap contributors",
   "license": "ODbL 1.0 (OSM); PDDL 1.0 (DataSF)",
   "graphFormat": "groundwork-graph-v2",
-  "method": "Contracted street graph with directed bicycle times and pedestrian-network times.",
+  "method": "Contracted street graph with destination-oriented directed bicycle times, pedestrian-network times, and sampled park perimeter access.",
   "assets": {
-    "graph": "graph-sf-osm-datasf-2026-09-01-v2.bin.gz",
-    "places": "places-sf-osm-datasf-2026-09-01-v2.json",
-    "neighborhoods": "neighborhoods-sf-osm-datasf-2026-09-01-v2.geojson",
-    "boundary": "boundary-sf-osm-datasf-2026-09-01-v2.geojson",
-    "nodeLabels": "node-labels-sf-osm-datasf-2026-09-01-v2.json"
+    "graph": "graph-sf-osm-datasf-2026-09-02-v2.bin.gz",
+    "places": "places-sf-osm-datasf-2026-09-02-v2.json",
+    "neighborhoods": "neighborhoods-sf-osm-datasf-2026-09-02-v2.geojson",
+    "boundary": "boundary-sf-osm-datasf-2026-09-02-v2.geojson",
+    "nodeLabels": "node-labels-sf-osm-datasf-2026-09-02-v2.json"
   },
   "counts": {
     "graphNodes": 69008,
@@ -24,7 +24,7 @@
   "compressedGraphBytes": 1492786,
   "sources": [
     {
-      "name": "OpenStreetMap Overpass SF extract (osmium fallback)",
+      "name": "OpenStreetMap Overpass San Francisco extract (osmium fallback)",
       "url": "https://overpass-api.de/api/interpreter",
       "extractDate": "2026-09-01",
       "sha256": "2e8e567b5c8617de2836f46f6f32cb4cdc12dec31a88a86d660f9c5eb31a5c68",
@@ -34,13 +34,13 @@
     {
       "name": "DataSF Analysis Neighborhoods (j2bu-swwd)",
       "url": "https://data.sfgov.org/resource/j2bu-swwd.geojson?$limit=100",
-      "extractDate": "2026-09-01",
+      "extractDate": "2026-09-02",
       "sha256": "376c25348e45a41c540d995c3557ef48232805a152953da75ced2e5b66c86621"
     },
     {
       "name": "DataSF Bay Area County Polygons (wamw-vt4s), San Francisco filter",
       "url": "https://data.sfgov.org/resource/wamw-vt4s.geojson?$limit=50&$where=county%3D%27San%20Francisco%27",
-      "extractDate": "2026-09-01",
+      "extractDate": "2026-09-02",
       "sha256": "ecf625b59bb55066031539d5bac47e7e715843e05d358b73f71dfa91d0eef88c"
     }
   ]

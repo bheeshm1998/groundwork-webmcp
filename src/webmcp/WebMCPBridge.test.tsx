@@ -73,6 +73,7 @@ function resetStore() {
     activity: [],
     undo: null,
     operation: 'idle',
+    drawingReady: true,
     analysisFreshness: 'not-combined',
     error: null,
     initialized: true,
@@ -135,7 +136,10 @@ describe('WebMCPBridge', () => {
       .get('groundwork_add_bike_condition')!
       .execute({ maxMinutes: 25 }, { signal: new AbortController().signal });
 
-    expect(execute).toHaveBeenCalledWith({ type: 'add-bike', maxMinutes: 25, actor: 'agent' });
+    expect(execute).toHaveBeenCalledWith(
+      { type: 'add-bike', maxMinutes: 25, actor: 'agent' },
+      expect.any(AbortSignal),
+    );
     await expect(
       tools
         .get('groundwork_add_bike_condition')!

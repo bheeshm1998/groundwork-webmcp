@@ -126,6 +126,7 @@ export function ConditionsPanel() {
   const freshness = useWorkspaceStore((state) => state.analysisFreshness);
   const combined = useWorkspaceStore((state) => state.canonical.combined);
   const operation = useWorkspaceStore((state) => state.operation);
+  const drawingReady = useWorkspaceStore((state) => state.drawingReady);
   const [bikeMinutes, setBikeMinutes] = useState(25);
   const [groceryMinutes, setGroceryMinutes] = useState(10);
   const [parkMinutes, setParkMinutes] = useState(8);
@@ -226,8 +227,17 @@ export function ConditionsPanel() {
             <button
               type="button"
               className="quiet-button"
-              onClick={() => void requestPreferenceDraw().catch(() => undefined)}
-              disabled={mutationsDisabled}
+              onClick={() => {
+                void (async () => {
+                  try {
+                    const geometry = await requestPreferenceDraw();
+                    await workspaceService.execute({ type: 'add-preference', geometry });
+                  } catch {
+                    // Cancellation is an expected user action.
+                  }
+                })();
+              }}
+              disabled={mutationsDisabled || !drawingReady}
             >
               Draw on map
             </button>

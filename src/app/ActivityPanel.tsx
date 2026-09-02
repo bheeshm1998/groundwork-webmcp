@@ -35,12 +35,15 @@ export function ActivityPanel() {
           type="button"
           className="primary-button"
           onClick={share}
-          disabled={state.operation === 'calculating'}
+          disabled={state.operation === 'calculating' || state.operation === 'drawing'}
         >
           Share plan
         </button>
       </div>
       {shareMessage ? <output className="share-output">{shareMessage}</output> : null}
+      <p className="share-privacy-note">
+        Share links include the current plan, not your history or undo state.
+      </p>
 
       <div className="activity-heading">
         <h3>Recent changes</h3>

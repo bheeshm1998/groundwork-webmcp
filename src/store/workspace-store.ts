@@ -22,6 +22,8 @@ export interface WorkspaceStore {
   analysisFreshness: AnalysisFreshness;
   error: string | null;
   initialized: boolean;
+  drawingReady: boolean;
+  workspaceEpoch: number;
   setOperation: (operation: OperationState, error?: string | null) => void;
   commit: (next: Partial<Omit<WorkspaceStore, 'setOperation' | 'commit'>>) => void;
 }
@@ -38,6 +40,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   analysisFreshness: 'not-combined',
   error: null,
   initialized: false,
+  drawingReady: false,
+  workspaceEpoch: 0,
   setOperation: (operation, error = null) => set({ operation, error }),
   commit: (next) => set(next),
 }));

@@ -32,7 +32,7 @@ export function HomePage() {
       <section className="hero-section">
         <div className="hero-copy">
           <p className="hero-kicker">Neighborhood planning for San Francisco and Hyderabad</p>
-          <h1>Find places that fits your preferences</h1>
+          <h1>Find places that fit your preferences</h1>
           <div className="city-picker" id="choose-city" aria-labelledby="city-picker-label">
             <br></br>
             <br></br>

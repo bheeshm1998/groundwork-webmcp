@@ -172,6 +172,37 @@ export function decodeGraphBinary(bytes: Uint8Array): GraphData {
   return { lng, lat, offsets, targets, bikeWeights, walkWeights };
 }
 
+/**
+ * Reverse every directed edge while retaining the graph's compact adjacency layout.
+ * Commute searches use this graph because the question is "which homes can reach the
+ * destination?", not "where can I travel from the destination?".
+ */
+export function reverseGraph(graph: GraphData): GraphData {
+  const nodeCount = graph.lng.length;
+  const offsets = new Uint32Array(nodeCount + 1);
+  for (const target of graph.targets) offsets[target + 1]! += 1;
+  for (let index = 1; index < offsets.length; index += 1) {
+    offsets[index] = offsets[index]! + offsets[index - 1]!;
+  }
+
+  const targets = new Uint32Array(graph.targets.length);
+  const bikeWeights = new Float32Array(graph.bikeWeights.length);
+  const walkWeights = new Float32Array(graph.walkWeights.length);
+  const cursors = offsets.slice(0, nodeCount);
+  for (let source = 0; source < nodeCount; source += 1) {
+    for (let edge = graph.offsets[source]!; edge < graph.offsets[source + 1]!; edge += 1) {
+      const target = graph.targets[edge]!;
+      const reversedEdge = cursors[target]!;
+      cursors[target] = reversedEdge + 1;
+      targets[reversedEdge] = source;
+      bikeWeights[reversedEdge] = graph.bikeWeights[edge]!;
+      walkWeights[reversedEdge] = graph.walkWeights[edge]!;
+    }
+  }
+
+  return { lng: graph.lng, lat: graph.lat, offsets, targets, bikeWeights, walkWeights };
+}
+
 export function nearestNode(graph: GraphData, coordinate: Coordinate): number {
   return nearestNodeForMode(graph, coordinate);
 }
@@ -279,7 +310,9 @@ export function multiSourceDijkstra(
       if (next <= cutoffMinutes && next < distances[target]!) {
         distances[target] = next;
         owners[target] = owners[node]!;
-        queue.push([next, target]);
+        // Float32 storage can round `next` down. Queue the stored value so the
+        // stale-entry guard does not reject a node because of that rounding.
+        queue.push([distances[target]!, target]);
       }
     }
   }

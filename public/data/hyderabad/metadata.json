@@ -1,17 +1,17 @@
 {
-  "datasetVersion": "hyderabad-osm-2026-09-02-v1",
-  "generatedAt": "2026-09-02T04:40:02.996Z",
+  "datasetVersion": "hyderabad-osm-2026-09-02-v2",
+  "generatedAt": "2026-09-02T12:08:40.437Z",
   "coverage": "Hyderabad, Telangana, India",
   "attribution": "© OpenStreetMap contributors",
   "license": "ODbL 1.0 (OSM)",
   "graphFormat": "groundwork-graph-v2",
-  "method": "Contracted street graph with directed bicycle times and pedestrian-network times.",
+  "method": "Contracted street graph with destination-oriented directed bicycle times, pedestrian-network times, and sampled park perimeter access.",
   "assets": {
-    "graph": "graph-hyderabad-osm-2026-09-02-v1.bin.gz",
-    "places": "places-hyderabad-osm-2026-09-02-v1.json",
-    "neighborhoods": "neighborhoods-hyderabad-osm-2026-09-02-v1.geojson",
-    "boundary": "boundary-hyderabad-osm-2026-09-02-v1.geojson",
-    "nodeLabels": "node-labels-hyderabad-osm-2026-09-02-v1.json"
+    "graph": "graph-hyderabad-osm-2026-09-02-v2.bin.gz",
+    "places": "places-hyderabad-osm-2026-09-02-v2.json",
+    "neighborhoods": "neighborhoods-hyderabad-osm-2026-09-02-v2.geojson",
+    "boundary": "boundary-hyderabad-osm-2026-09-02-v2.geojson",
+    "nodeLabels": "node-labels-hyderabad-osm-2026-09-02-v2.json"
   },
   "counts": {
     "graphNodes": 263613,

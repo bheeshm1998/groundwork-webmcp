@@ -33,6 +33,7 @@ type Place = {
   id: string;
   name: string;
   coordinates: Coordinate;
+  accessPoints?: Coordinate[];
   type?: 'supermarket' | 'grocery' | 'convenience';
 };
 
@@ -40,7 +41,8 @@ const projectRoot = resolve(import.meta.dirname, '../..');
 const sourceDirectory = join(projectRoot, 'data/source');
 const buildDate = new Date().toISOString().slice(0, 10);
 const overpassUrl = 'https://overpass-api.de/api/interpreter';
-const requestedCity = process.argv[process.argv.indexOf('--city') + 1] ?? 'sf';
+const cityFlagIndex = process.argv.indexOf('--city');
+const requestedCity = cityFlagIndex >= 0 ? (process.argv[cityFlagIndex + 1] ?? '') : 'sf';
 const cityConfigs = {
   sf: {
     slug: 'sf',
@@ -59,7 +61,7 @@ const cityConfigs = {
     name: 'Hyderabad',
     bbox: '17.20,78.29,17.56,78.67',
     osmiumBbox: '78.29,17.20,78.67,17.56',
-    datasetVersion: `hyderabad-osm-${buildDate}-v1`,
+    datasetVersion: `hyderabad-osm-${buildDate}-v2`,
     maxGraphBytes: 8 * 1024 * 1024,
     neighborhoodUrl: null,
     boundaryUrl: null,
@@ -172,6 +174,22 @@ function pointOnElement(element: OverpassElement): Coordinate | null {
   }
   if (element.center) return [element.center.lon, element.center.lat];
   return direct[0] ?? null;
+}
+
+function perimeterAccessPoints(element: OverpassElement, fallback: Coordinate): Coordinate[] {
+  const perimeter =
+    element.type === 'relation'
+      ? (element.members ?? [])
+          .filter(({ role, geometry }) => role === 'outer' && geometry)
+          .flatMap(({ geometry }) => geometry!.map(({ lon, lat }) => [lon, lat] as Coordinate))
+      : geometryCoordinates(element);
+  const unique = [
+    ...new Map(perimeter.map((coordinate) => [coordinateKey(coordinate), coordinate])).values(),
+  ];
+  if (unique.length === 0) return [fallback];
+  const maximumPoints = 12;
+  const stride = Math.max(1, Math.ceil(unique.length / maximumPoints));
+  return unique.filter((_, index) => index % stride === 0).slice(0, maximumPoints);
 }
 
 async function fetchPinned(url: string, init?: RequestInit) {
@@ -333,6 +351,18 @@ async function loadOsmSource() {
         },
         body: new URLSearchParams({ data: overpassQuery }),
       });
+  let cachedQuerySha256: string | null = null;
+  if (cached) {
+    try {
+      const previousMetadata = JSON.parse(
+        await readFile(join(outputDirectory, 'metadata.json'), 'utf8'),
+      ) as { sources?: Array<{ cachedAs?: string; querySha256?: string | null }> };
+      cachedQuerySha256 =
+        previousMetadata.sources?.find(({ cachedAs }) => cachedAs === cached)?.querySha256 ?? null;
+    } catch {
+      // Older source caches may predate metadata; do not misattribute them to today's query.
+    }
+  }
   const payload = JSON.parse(new TextDecoder().decode(responseBytes)) as {
     osm3s?: { timestamp_osm_base?: string };
     elements?: OverpassElement[];
@@ -351,7 +381,7 @@ async function loadOsmSource() {
     sourceName: `OpenStreetMap Overpass ${city.name} extract (osmium fallback)`,
     sourceUrl: overpassUrl,
     sourceSha256: sha256(responseBytes),
-    querySha256: sha256(overpassQuery),
+    querySha256: cached ? cachedQuerySha256 : sha256(overpassQuery),
   };
 }
 
@@ -583,7 +613,14 @@ function buildPlaces(elements: OverpassElement[]) {
       shop = tags.shop;
     if (['supermarket', 'grocery', 'convenience'].includes(shop))
       groceries.push({ id, name, coordinates: coordinate, type: shop as Place['type'] });
-    if (tags.leisure === 'park') parks.push({ id, name, coordinates: coordinate });
+    if (tags.leisure === 'park') {
+      parks.push({
+        id,
+        name,
+        coordinates: coordinate,
+        accessPoints: perimeterAccessPoints(element, coordinate),
+      });
+    }
     if (tags.highway) continue;
     const key = `${name.toLowerCase()}:${coordinateKey(coordinate)}`;
     if (!seen.has(key)) {
@@ -720,7 +757,8 @@ async function main() {
     attribution: '© OpenStreetMap contributors',
     license: city.slug === 'sf' ? 'ODbL 1.0 (OSM); PDDL 1.0 (DataSF)' : 'ODbL 1.0 (OSM)',
     graphFormat: 'groundwork-graph-v2',
-    method: 'Contracted street graph with directed bicycle times and pedestrian-network times.',
+    method:
+      'Contracted street graph with destination-oriented directed bicycle times, pedestrian-network times, and sampled park perimeter access.',
     assets: {
       graph: graphFile,
       places: placesFile,

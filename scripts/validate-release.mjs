@@ -1,4 +1,9 @@
-const token = process.env.VITE_WEBMCP_ORIGIN_TRIAL_TOKEN?.trim();
+import { loadEnv } from 'vite';
+
+const fileEnvironment = loadEnv('production', process.cwd(), '');
+const token = (
+  process.env.VITE_WEBMCP_ORIGIN_TRIAL_TOKEN ?? fileEnvironment.VITE_WEBMCP_ORIGIN_TRIAL_TOKEN
+)?.trim();
 
 if (!token) {
   console.error(

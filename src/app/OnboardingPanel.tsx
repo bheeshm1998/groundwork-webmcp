@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import type { LocationResult } from '../domain/schemas';
 import { CITIES } from '../domain/cities';
 import { workspaceService } from '../domain/workspace-service';
@@ -16,7 +16,16 @@ export function OnboardingPanel() {
   const conditionCount = useWorkspaceStore((state) => state.canonical.conditions.length);
   const operation = useWorkspaceStore((state) => state.operation);
   const cityId = useWorkspaceStore((state) => state.cityId);
+  const workspaceEpoch = useWorkspaceStore((state) => state.workspaceEpoch);
   const city = CITIES[cityId];
+
+  useEffect(() => {
+    setQuery('');
+    setMatches([]);
+    setSearched(false);
+    setConfirmingSample(false);
+    setEditingStart(false);
+  }, [workspaceEpoch]);
 
   const search = async (event: FormEvent) => {
     event.preventDefault();
@@ -40,25 +49,27 @@ export function OnboardingPanel() {
     setConfirmingSample(false);
     setLoadingSample(true);
     try {
-      await workspaceService.execute({ type: 'reset' });
-      await workspaceService.execute({ type: 'set-office', office: city.sampleOffice });
-      await workspaceService.execute({
-        type: 'add-bike',
-        maxMinutes: city.samplePriorities.bikeMinutes,
-      });
-      await workspaceService.execute({
-        type: 'add-access',
-        category: 'grocery',
-        maxMinutes: city.samplePriorities.groceryMinutes,
-        groceryType: 'supermarket',
-      });
-      await workspaceService.execute({
-        type: 'add-access',
-        category: 'park',
-        maxMinutes: city.samplePriorities.parkMinutes,
-      });
-      await workspaceService.execute({ type: 'combine' });
-      setEditingStart(false);
+      const commands = [
+        { type: 'reset' as const },
+        { type: 'set-office' as const, office: city.sampleOffice },
+        { type: 'add-bike' as const, maxMinutes: city.samplePriorities.bikeMinutes },
+        {
+          type: 'add-access' as const,
+          category: 'grocery' as const,
+          maxMinutes: city.samplePriorities.groceryMinutes,
+          groceryType: 'supermarket' as const,
+        },
+        {
+          type: 'add-access' as const,
+          category: 'park' as const,
+          maxMinutes: city.samplePriorities.parkMinutes,
+        },
+        { type: 'combine' as const },
+      ];
+      for (const command of commands) {
+        const result = await workspaceService.execute(command);
+        if (!result.ok) break;
+      }
     } finally {
       setLoadingSample(false);
     }
@@ -101,7 +112,7 @@ export function OnboardingPanel() {
             id="office-search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Address, street, or landmark"
+            placeholder="Street or landmark"
             minLength={2}
             autoFocus={!office}
           />
@@ -118,20 +129,30 @@ export function OnboardingPanel() {
       {matches.length > 0 ? (
         <ul className="search-results" aria-label="Location matches">
           {matches.map((match) => (
-            <li key={match.id}>
+            <li key={`${match.id}-${match.kind}-${match.coordinates.join(',')}`}>
               <button
                 type="button"
                 onClick={() => {
-                  void workspaceService.execute({
-                    type: 'set-office',
-                    office: { label: match.label, coordinates: match.coordinates },
-                  });
-                  setMatches([]);
-                  setEditingStart(false);
+                  void (async () => {
+                    const result = await workspaceService.execute({
+                      type: 'set-office',
+                      office: { label: match.label, coordinates: match.coordinates },
+                    });
+                    if (result.ok) {
+                      setMatches([]);
+                      setEditingStart(false);
+                    }
+                  })();
                 }}
               >
                 <span className="search-result-marker" aria-hidden="true" />
-                {match.label}
+                <span className="search-result-copy">
+                  <strong>{match.label}</strong>
+                  <small>
+                    {match.kind === 'street' ? 'Street' : 'Place'} ·{' '}
+                    {match.coordinates[1].toFixed(3)}, {match.coordinates[0].toFixed(3)}
+                  </small>
+                </span>
               </button>
             </li>
           ))}

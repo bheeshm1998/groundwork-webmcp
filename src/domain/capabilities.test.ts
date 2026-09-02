@@ -17,4 +17,16 @@ describe('capabilities', () => {
       false,
     );
   });
+
+  it('keeps recovery mutations available after a rejected command', () => {
+    const capabilities = getCapabilities(
+      EMPTY_CANONICAL,
+      EMPTY_DERIVED,
+      'not-combined',
+      false,
+      'error',
+    );
+    expect(capabilities.has('set-office')).toBe(true);
+    expect(capabilities.has('add-access')).toBe(true);
+  });
 });

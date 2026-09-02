@@ -4,6 +4,7 @@ import {
   loadGraph,
   multiSourceDijkstra,
   nearestNode,
+  reverseGraph,
   type SerializedAdjacencyGraph,
 } from './graph';
 
@@ -63,5 +64,29 @@ describe('road graph', () => {
     expect(result.distances[1]).toBe(3);
     expect(result.owners[1]).toBe(0);
     expect(result.distances[3]).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('does not drop fractional-weight paths because distances use Float32 storage', () => {
+    const nodes = Array.from({ length: 20 }, (_, index) => [-122.4 + index / 10_000, 37.77]) as [
+      number,
+      number,
+    ][];
+    const graph = loadGraph({
+      format: 'adjacency-v1',
+      nodes,
+      offsets: Array.from({ length: 21 }, (_, index) => Math.min(index, 19)),
+      targets: Array.from({ length: 19 }, (_, index) => index + 1),
+      weights: Array.from({ length: 19 }, () => 0.123_456_789),
+    });
+
+    expect(Number.isFinite(dijkstra(graph, 0, 5)[19])).toBe(true);
+  });
+
+  it('reverses directed edges for destination-oriented commute searches', () => {
+    const reversed = reverseGraph(loadGraph(graphFixture));
+    const toDestination = dijkstra(reversed, 2, 20);
+
+    expect(toDestination[0]).toBe(8);
+    expect(toDestination[1]).toBe(4);
   });
 });

@@ -51,7 +51,16 @@ const api: GeoWorkerApi = {
         : transportedGraph;
     const graph = decodeGraphBinary(graphBinary);
     engine = new GeoEngine(graph, loadedPlaces, boundary, neighborhoods, nodeLabels);
-    return { metadata: loadedMetadata, search: loadedPlaces.search };
+    return {
+      metadata: loadedMetadata,
+      search: loadedPlaces.search.filter(({ coordinates }) =>
+        engine!.containsCoordinate(coordinates),
+      ),
+    };
+  },
+  async isCoordinateSupported(coordinate) {
+    if (!engine) throw new Error('The analysis engine is not initialized.');
+    return engine.containsCoordinate(coordinate);
   },
   async analyze(canonical) {
     if (!engine) throw new Error('The analysis engine is not initialized.');

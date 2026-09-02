@@ -1,4 +1,4 @@
-import type { CanonicalWorkspace, DerivedAnalysis } from '../domain/schemas';
+import type { CanonicalWorkspace, Coordinate, DerivedAnalysis } from '../domain/schemas';
 import type { CityId } from '../domain/cities';
 import type { PlacesData } from './engine';
 
@@ -19,5 +19,6 @@ export interface DatasetMetadata {
 
 export interface GeoWorkerApi {
   initialize(cityId: CityId): Promise<{ metadata: DatasetMetadata; search: PlacesData['search'] }>;
+  isCoordinateSupported(coordinate: Coordinate): Promise<boolean>;
   analyze(canonical: CanonicalWorkspace): Promise<DerivedAnalysis>;
 }

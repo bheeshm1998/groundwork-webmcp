@@ -82,4 +82,34 @@ describe('workspace schemas', () => {
       }),
     ).toThrow();
   });
+
+  it('rejects zero-area and self-intersecting preference polygons', () => {
+    const feature = (coordinates: number[][]) => ({
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'Polygon', coordinates: [coordinates] },
+    });
+
+    expect(() =>
+      PolygonFeatureSchema.parse(
+        feature([
+          [0, 0],
+          [1, 0],
+          [2, 0],
+          [0, 0],
+        ]),
+      ),
+    ).toThrow();
+    expect(() =>
+      PolygonFeatureSchema.parse(
+        feature([
+          [0, 0],
+          [1, 1],
+          [0, 1],
+          [1, 0],
+          [0, 0],
+        ]),
+      ),
+    ).toThrow();
+  });
 });

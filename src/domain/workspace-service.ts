@@ -101,10 +101,37 @@ function userMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('The operation was cancelled.', 'AbortError');
+}
+
+function isAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
 export class WorkspaceService {
   private searchIndex: LocationResult[] = [];
+  private initialization: { cityId: CityId; promise: Promise<CommandResult> } | null = null;
 
   async initialize(requestedCityId: CityId = DEFAULT_CITY_ID): Promise<CommandResult> {
+    if (this.initialization) {
+      if (this.initialization.cityId === requestedCityId) return this.initialization.promise;
+      try {
+        await this.initialization.promise;
+      } catch {
+        // A request for another city should still get its own initialization attempt.
+      }
+    }
+    const promise = this.initializeOnce(requestedCityId);
+    this.initialization = { cityId: requestedCityId, promise };
+    try {
+      return await promise;
+    } finally {
+      if (this.initialization?.promise === promise) this.initialization = null;
+    }
+  }
+
+  private async initializeOnce(requestedCityId: CityId): Promise<CommandResult> {
     const store = useWorkspaceStore.getState();
     store.setOperation('calculating');
     try {
@@ -130,6 +157,13 @@ export class WorkspaceService {
             ? 'This share link uses a different map dataset and cannot be opened safely.'
             : 'The saved workspace used an older map dataset and was not restored.',
         });
+        if (!window.location.hash) {
+          try {
+            clearLocalWorkspace();
+          } catch {
+            // The incompatible snapshot is still ignored when storage is unavailable.
+          }
+        }
         restored = null;
       }
       const canonical = restored?.canonical ?? emptyCanonical(cityId);
@@ -156,8 +190,9 @@ export class WorkspaceService {
     }
   }
 
-  async execute(command: WorkspaceCommand): Promise<CommandResult> {
+  async execute(command: WorkspaceCommand, signal?: AbortSignal): Promise<CommandResult> {
     const state = workspaceSnapshot();
+    if (signal?.aborted) return { ok: false, message: 'The operation was cancelled.' };
     if (state.operation === 'calculating')
       return { ok: false, message: 'Another calculation is still running.' };
     if (state.operation === 'drawing' && !['set-view', 'reset'].includes(command.type)) {
@@ -184,10 +219,12 @@ export class WorkspaceService {
       if (!state.undo) return { ok: false, message: 'There is no recent change to undo.' };
       state.setOperation('calculating');
       try {
+        throwIfAborted(signal);
         const restored = CanonicalWorkspaceSchema.parse(state.undo);
         const derived = restored.conditions.length
           ? await getGeoWorker().analyze(restored)
           : structuredClone(EMPTY_DERIVED);
+        throwIfAborted(signal);
         state.commit({
           canonical: restored,
           derived,
@@ -200,6 +237,10 @@ export class WorkspaceService {
         if (warning) state.commit({ error: warning });
         return { ok: true, message: warning ?? 'The last change was undone.' };
       } catch (error) {
+        if (isAbort(error)) {
+          state.setOperation('idle');
+          return { ok: false, message: 'The operation was cancelled.' };
+        }
         const message = userMessage(error, 'Undo failed.');
         state.setOperation('error', message);
         return { ok: false, message };
@@ -220,6 +261,7 @@ export class WorkspaceService {
         operation: 'idle',
         analysisFreshness: 'not-combined',
         error: null,
+        workspaceEpoch: state.workspaceEpoch + 1,
       });
       if (window.location.hash)
         history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -233,6 +275,7 @@ export class WorkspaceService {
     let freshness = state.analysisFreshness;
 
     try {
+      throwIfAborted(signal);
       switch (command.type) {
         case 'set-office':
           if (!coordinateIsInCity(state.cityId, command.office.coordinates)) {
@@ -240,6 +283,12 @@ export class WorkspaceService {
               `Choose a location inside the supported ${CITIES[state.cityId].name} area.`,
             );
           }
+          if (!(await getGeoWorker().isCoordinateSupported(command.office.coordinates))) {
+            throw new Error(
+              `Choose a location inside the supported ${CITIES[state.cityId].name} map boundary.`,
+            );
+          }
+          throwIfAborted(signal);
           canonical.office = command.office;
           canonical.selectedCandidateId = null;
           if (canonical.combined && canonical.conditions.some(({ kind }) => kind === 'bike')) {
@@ -327,7 +376,6 @@ export class WorkspaceService {
         case 'rank':
           if (!canonical.combined || freshness !== 'fresh')
             throw new Error('Create a fresh feasible region before ranking candidates.');
-          needsAnalysis = false;
           break;
         case 'select-candidate':
           if (
@@ -351,14 +399,24 @@ export class WorkspaceService {
       }
 
       canonical = CanonicalWorkspaceSchema.parse(canonical);
-      const derived = needsAnalysis ? await getGeoWorker().analyze(canonical) : state.derived;
+      const derived = needsAnalysis
+        ? await getGeoWorker().analyze(canonical)
+        : structuredClone(state.derived);
+      throwIfAborted(signal);
       if (
         canonical.selectedCandidateId &&
         !derived.candidates.some(({ id }) => id === canonical.selectedCandidateId)
       ) {
         canonical.selectedCandidateId = null;
       }
-      if (freshness === 'stale') derived.candidates = [];
+      if (needsAnalysis) freshness = canonical.combined ? 'fresh' : 'not-combined';
+      if (freshness === 'stale') {
+        derived.layers = {};
+        derived.feasibleRegion = null;
+        derived.feasibleAreaKm2 = 0;
+        derived.candidates = [];
+        derived.restriction = null;
+      }
       if (!canonical.combined) freshness = 'not-combined';
       state.commit({
         canonical,
@@ -381,6 +439,10 @@ export class WorkspaceService {
         },
       };
     } catch (error) {
+      if (isAbort(error)) {
+        state.setOperation('idle');
+        return { ok: false, message: 'The operation was cancelled.' };
+      }
       const message = userMessage(error, 'The workspace change failed.');
       state.setOperation('error', message);
       return { ok: false, message };
@@ -441,8 +503,8 @@ export class WorkspaceService {
                 cityId: state.cityId,
                 datasetVersion: state.datasetVersion || DATASET_VERSION,
                 canonical: state.canonical,
-                activity: state.activity,
-                undo: state.undo,
+                activity: [],
+                undo: null,
               }),
             },
           };
@@ -465,7 +527,13 @@ export class WorkspaceService {
       ({ label }) =>
         !label.toLowerCase().startsWith(normalized) && label.toLowerCase().includes(normalized),
     );
-    return [...startsWith, ...contains].slice(0, 8);
+    const unique = new Map<string, LocationResult>();
+    for (const match of [...startsWith, ...contains]) {
+      const key = `${match.kind}:${match.label.toLowerCase()}:${match.coordinates.join(',')}`;
+      if (!unique.has(key)) unique.set(key, match);
+      if (unique.size === 8) break;
+    }
+    return [...unique.values()];
   }
 }
 

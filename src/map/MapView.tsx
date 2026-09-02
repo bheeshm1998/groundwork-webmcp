@@ -6,7 +6,7 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { MaplibreTerradrawControl } from '@watergis/maplibre-gl-terradraw';
 import '@watergis/maplibre-gl-terradraw/dist/maplibre-gl-terradraw.css';
 import type { Feature, FeatureCollection, Point } from 'geojson';
-import type { AreaGeometry } from '../domain/schemas';
+import type { AreaGeometry, WorkspaceCommand } from '../domain/schemas';
 import { workspaceService } from '../domain/workspace-service';
 import { cancelPreferenceDraw, completePreferenceDraw } from './drawing';
 import { useWorkspaceStore } from '../store/workspace-store';
@@ -249,6 +249,7 @@ export function MapView() {
       syncingDrawRef.current = false;
       drawnPreferenceIdRef.current = null;
       draw.setMode('render');
+      setDrawReadyVersion((version) => version + 1);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && workspaceSnapshot().operation === 'drawing') {
@@ -260,6 +261,35 @@ export function MapView() {
     window.addEventListener('keydown', onKeyDown);
 
     const draw = drawControl.getTerraDrawInstance();
+    let pendingPreferenceCommand: WorkspaceCommand | null = null;
+    let processingPreferenceCommand = false;
+    const waitUntilMutable = () =>
+      new Promise<void>((resolve) => {
+        if (!['calculating', 'drawing'].includes(workspaceSnapshot().operation)) {
+          resolve();
+          return;
+        }
+        const unsubscribe = useWorkspaceStore.subscribe((state) => {
+          if (!['calculating', 'drawing'].includes(state.operation)) {
+            unsubscribe();
+            resolve();
+          }
+        });
+      });
+    const queuePreferenceCommand = (command: WorkspaceCommand) => {
+      pendingPreferenceCommand = command;
+      if (processingPreferenceCommand) return;
+      processingPreferenceCommand = true;
+      void (async () => {
+        while (pendingPreferenceCommand) {
+          await waitUntilMutable();
+          const next = pendingPreferenceCommand;
+          pendingPreferenceCommand = null;
+          await workspaceService.execute(next);
+        }
+        processingPreferenceCommand = false;
+      })();
+    };
     const onFinish = (featureId: string | number) => {
       const feature = draw?.getSnapshotFeature(featureId);
       if (!feature || feature.geometry.type !== 'Polygon') return;
@@ -270,8 +300,9 @@ export function MapView() {
       } as AreaGeometry;
       drawnPreferenceIdRef.current = featureId;
       draw?.setMode('select');
-      completePreferenceDraw(geometry);
-      void workspaceService.execute({ type: 'add-preference', geometry });
+      if (!completePreferenceDraw(geometry)) {
+        queuePreferenceCommand({ type: 'add-preference', geometry });
+      }
     };
     const onDrawChange = (featureIds: Array<string | number>, changeType: string) => {
       if (syncingDrawRef.current) return;
@@ -281,7 +312,7 @@ export function MapView() {
       if (changeType === 'delete' && drawnPreferenceIdRef.current !== null) {
         if (featureIds.includes(drawnPreferenceIdRef.current) && preferenceId) {
           drawnPreferenceIdRef.current = null;
-          void workspaceService.execute({ type: 'delete-condition', id: preferenceId });
+          queuePreferenceCommand({ type: 'delete-condition', id: preferenceId });
         }
         return;
       }
@@ -290,7 +321,7 @@ export function MapView() {
       if (featureId === null || !featureIds.includes(featureId)) return;
       const feature = draw?.getSnapshotFeature(featureId);
       if (feature?.geometry.type === 'Polygon') {
-        void workspaceService.execute({
+        queuePreferenceCommand({
           type: 'add-preference',
           geometry: {
             type: 'Feature',
@@ -302,6 +333,7 @@ export function MapView() {
     };
     draw?.on('finish', onFinish);
     draw?.on('change', onDrawChange);
+    useWorkspaceStore.getState().commit({ drawingReady: Boolean(draw) });
 
     return () => {
       if (workspaceSnapshot().operation === 'drawing') {
@@ -309,6 +341,7 @@ export function MapView() {
       }
       draw?.off('finish', onFinish);
       draw?.off('change', onDrawChange);
+      useWorkspaceStore.getState().commit({ drawingReady: false });
       window.removeEventListener('groundwork:start-draw', onStartDraw);
       window.removeEventListener('groundwork:cancel-draw', onCancelDraw);
       window.removeEventListener('keydown', onKeyDown);
@@ -367,12 +400,16 @@ export function MapView() {
       .setLngLat(office.coordinates)
       .setPopup(new maplibregl.Popup({ offset: 24 }).setText(office.label))
       .addTo(map);
-    marker.on('dragend', () => {
+    marker.on('dragend', async () => {
       const location = marker.getLngLat();
-      void workspaceService.execute({
+      const result = await workspaceService.execute({
         type: 'set-office',
         office: { label: 'Moved office marker', coordinates: [location.lng, location.lat] },
       });
+      if (!result.ok) {
+        const currentOffice = workspaceSnapshot().canonical.office;
+        if (currentOffice) marker.setLngLat(currentOffice.coordinates);
+      }
     });
     officeMarkerRef.current = marker;
   }, [office]);

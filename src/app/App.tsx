@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { ActivityPanel } from './ActivityPanel';
 import { ConditionsPanel } from './ConditionsPanel';
 import { HomePage } from './HomePage';
@@ -24,26 +24,72 @@ function WorkspaceApp() {
   const conditionCount = useWorkspaceStore((state) => state.canonical.conditions.length);
   const hasResults = useWorkspaceStore((state) => state.canonical.combined);
   const [showActivity, setShowActivity] = useState(false);
+  const topbarRef = useRef<HTMLElement>(null);
+  const workspaceGridRef = useRef<HTMLDivElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const workspaceButtonRef = useRef<HTMLButtonElement>(null);
 
   const currentStep = hasResults ? 3 : office && conditionCount >= 2 ? 2 : office ? 2 : 1;
 
   useEffect(() => {
-    void workspaceService.initialize(requestedCityId);
+    const initializeWorkspace = () => {
+      setShowActivity(false);
+      void workspaceService.initialize(requestedCityId);
+    };
+    initializeWorkspace();
+    window.addEventListener('hashchange', initializeWorkspace);
+    return () => window.removeEventListener('hashchange', initializeWorkspace);
   }, [requestedCityId]);
 
   useEffect(() => {
     if (!showActivity) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setShowActivity(false);
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const outside = [topbarRef.current, workspaceGridRef.current].filter(
+      (element): element is HTMLElement => Boolean(element),
+    );
+    outside.forEach((element) => {
+      element.inert = true;
+    });
+    drawerCloseRef.current?.focus();
+    const handleDialogKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setShowActivity(false);
+        return;
+      }
+      if (event.key !== 'Tab' || !drawerRef.current) return;
+      const focusable = [
+        ...drawerRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ];
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
+    window.addEventListener('keydown', handleDialogKey);
+    return () => {
+      window.removeEventListener('keydown', handleDialogKey);
+      outside.forEach((element) => {
+        element.inert = false;
+      });
+      previousFocus?.focus();
+    };
   }, [showActivity]);
 
   return (
     <main className="app-shell workspace-page">
       <WebMCPBridge />
-      <header className="topbar">
+      <header ref={topbarRef} className="topbar">
         <a className="brand" href="/" aria-label="SweetSpot home">
           <span className="brand-mark">S</span>
           <span>SweetSpot</span>
@@ -64,7 +110,12 @@ function WorkspaceApp() {
           })}
         </nav>
         <div className="topbar-actions">
-          <button type="button" className="quiet-button" onClick={() => setShowActivity(true)}>
+          <button
+            ref={workspaceButtonRef}
+            type="button"
+            className="quiet-button"
+            onClick={() => setShowActivity(true)}
+          >
             Workspace
           </button>
           <span
@@ -77,7 +128,7 @@ function WorkspaceApp() {
           />
         </div>
       </header>
-      <div className={`workspace-grid ${hasResults ? 'has-results' : ''}`}>
+      <div ref={workspaceGridRef} className={`workspace-grid ${hasResults ? 'has-results' : ''}`}>
         <aside className="planner-sidebar" aria-label="Plan setup">
           <OnboardingPanel />
           {office ? <ConditionsPanel /> : null}
@@ -87,6 +138,17 @@ function WorkspaceApp() {
             <Suspense fallback={<div className="map-loading">Loading map…</div>}>
               <MapView />
             </Suspense>
+          ) : operation === 'error' ? (
+            <div className="map-error initialization-error" role="alert">
+              <strong>Map data could not be prepared</strong>
+              <span>{error ?? 'The local analysis dataset failed to load.'}</span>
+              <button
+                type="button"
+                onClick={() => void workspaceService.initialize(requestedCityId)}
+              >
+                Retry data
+              </button>
+            </div>
           ) : (
             <div className="map-loading">Loading map…</div>
           )}
@@ -117,6 +179,7 @@ function WorkspaceApp() {
           onMouseDown={() => setShowActivity(false)}
         >
           <aside
+            ref={drawerRef}
             className="workspace-drawer"
             aria-label="Workspace options"
             aria-modal="true"
@@ -129,6 +192,7 @@ function WorkspaceApp() {
                 <h2>Workspace</h2>
               </div>
               <button
+                ref={drawerCloseRef}
                 type="button"
                 className="quiet-button"
                 aria-label="Close workspace options"
@@ -147,7 +211,7 @@ function WorkspaceApp() {
           <p>Preparing your map…</p>
         </div>
       ) : null}
-      {error ? (
+      {error && initialized ? (
         <div className="error-toast" role="alert">
           {error}
         </div>

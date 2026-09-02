@@ -17,6 +17,30 @@ export function ResultsPanel() {
   const operation = useWorkspaceStore((state) => state.operation);
   const mutationsDisabled = operation === 'calculating' || operation === 'drawing';
   const cityId = useWorkspaceStore((state) => state.cityId);
+  const freshness = useWorkspaceStore((state) => state.analysisFreshness);
+
+  if (freshness === 'stale') {
+    return (
+      <section className="results-panel" aria-labelledby="results-heading">
+        <div className="results-intro stale-results" role="status">
+          <p className="step-label">3 · Results</p>
+          <h2 id="results-heading">Results need updating</h2>
+          <p>
+            Your destination or bicycle limit changed. Update the matching areas before relying on
+            this plan.
+          </p>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={mutationsDisabled}
+            onClick={() => void workspaceService.execute({ type: 'recalculate' })}
+          >
+            Update matching areas
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="results-panel" aria-labelledby="results-heading">

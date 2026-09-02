@@ -1,7 +1,7 @@
 import type { CanonicalWorkspace, DerivedAnalysis } from './schemas';
 import { CITIES, DEFAULT_CITY_ID, type CityId } from './cities';
 
-export const DATASET_VERSION = 'sf-osm-datasf-2026-09-01-v2';
+export const DATASET_VERSION = 'sf-osm-datasf-2026-09-02-v2';
 
 export function emptyCanonical(cityId: CityId = DEFAULT_CITY_ID): CanonicalWorkspace {
   const city = CITIES[cityId];

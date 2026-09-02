@@ -23,6 +23,43 @@ const LinearRingSchema = z
   );
 const PolygonCoordinatesSchema = z.array(LinearRingSchema).min(1);
 
+function ringArea(ring: Coordinate[]): number {
+  let twiceArea = 0;
+  for (let index = 0; index < ring.length - 1; index += 1) {
+    const current = ring[index]!;
+    const next = ring[index + 1]!;
+    twiceArea += current[0] * next[1] - next[0] * current[1];
+  }
+  return Math.abs(twiceArea / 2);
+}
+
+function orientation(a: Coordinate, b: Coordinate, c: Coordinate): number {
+  return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+}
+
+function segmentsCross(a: Coordinate, b: Coordinate, c: Coordinate, d: Coordinate): boolean {
+  const abC = orientation(a, b, c);
+  const abD = orientation(a, b, d);
+  const cdA = orientation(c, d, a);
+  const cdB = orientation(c, d, b);
+  return (
+    ((abC > 0 && abD < 0) || (abC < 0 && abD > 0)) && ((cdA > 0 && cdB < 0) || (cdA < 0 && cdB > 0))
+  );
+}
+
+function ringSelfIntersects(ring: Coordinate[]): boolean {
+  const segmentCount = ring.length - 1;
+  for (let first = 0; first < segmentCount; first += 1) {
+    for (let second = first + 1; second < segmentCount; second += 1) {
+      if (second === first + 1 || (first === 0 && second === segmentCount - 1)) continue;
+      if (segmentsCross(ring[first]!, ring[first + 1]!, ring[second]!, ring[second + 1]!)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export const PolygonFeatureSchema = z
   .object({
     type: z.literal('Feature'),
@@ -47,6 +84,22 @@ export const PolygonFeatureSchema = z
         path: ['geometry', 'coordinates'],
         message: 'Drawings are limited to 500 vertices.',
       });
+    }
+    for (const [index, ring] of rings.entries()) {
+      const uniqueVertices = new Set(ring.slice(0, -1).map(([lng, lat]) => `${lng},${lat}`));
+      if (uniqueVertices.size < 3 || ringArea(ring) < 1e-12) {
+        context.addIssue({
+          code: 'custom',
+          path: ['geometry', 'coordinates', index],
+          message: 'Each polygon ring must enclose a non-zero area.',
+        });
+      } else if (ringSelfIntersects(ring)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['geometry', 'coordinates', index],
+          message: 'Polygon rings cannot cross themselves.',
+        });
+      }
     }
   }) as z.ZodType<AreaGeometry>;
 
@@ -219,4 +272,5 @@ export interface LocationResult {
   id: string;
   label: string;
   coordinates: Coordinate;
+  kind: 'poi' | 'street';
 }

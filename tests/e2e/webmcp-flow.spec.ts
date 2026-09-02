@@ -88,6 +88,41 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
   });
   await expect
     .poll(() =>
+      page.evaluate(() =>
+        (window as any).__groundworkTools.has('groundwork_start_preference_draw'),
+      ),
+    )
+    .toBe(true);
+  await page.evaluate(() => {
+    const tool = (window as any).__groundworkTools.get('groundwork_start_preference_draw');
+    (window as any).__groundworkDrawPromise = tool.execute(
+      {},
+      { signal: new AbortController().signal },
+    );
+  });
+  await expect(page.getByText(/Draw your preferred area/u)).toBeVisible();
+  const mapBounds = await page.getByRole('region', { name: 'Map' }).boundingBox();
+  if (!mapBounds) throw new Error('The analysis map has no visible bounds.');
+  await page.mouse.click(
+    mapBounds.x + mapBounds.width * 0.3,
+    mapBounds.y + mapBounds.height * 0.33,
+  );
+  await page.mouse.click(
+    mapBounds.x + mapBounds.width * 0.63,
+    mapBounds.y + mapBounds.height * 0.36,
+  );
+  await page.mouse.dblclick(
+    mapBounds.x + mapBounds.width * 0.45,
+    mapBounds.y + mapBounds.height * 0.62,
+  );
+  await expect
+    .poll(() => page.evaluate(async () => (window as any).__groundworkDrawPromise), {
+      timeout: 15_000,
+    })
+    .toMatchObject({ ok: true });
+  await expect(page.getByText(/Draw your preferred area/u)).toHaveCount(0);
+  await expect
+    .poll(() =>
       page.evaluate(() => (window as any).__groundworkTools.has('groundwork_combine_conditions')),
     )
     .toBe(true);
@@ -108,7 +143,7 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
       office: { label: 'San Francisco City Hall' },
     },
   });
-  expect((workspace as any).data.conditions).toHaveLength(3);
+  expect((workspace as any).data.conditions).toHaveLength(4);
   expect((workspace as any).data.candidates).toHaveLength(3);
   expect((workspace as any).data.feasibleAreaKm2).toBeGreaterThan(0);
 
