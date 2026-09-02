@@ -3,9 +3,16 @@ import { expect, test, type Page } from '@playwright/test';
 async function executeWebMcpTool(page: Page, name: string, input: Record<string, unknown> = {}) {
   return page.evaluate(
     async ({ toolName, toolInput }) => {
-      const tool = (window as any).__groundworkTools.get(toolName);
+      const modelContext = document.modelContext as typeof document.modelContext & {
+        executeTool: (
+          tool: Awaited<ReturnType<NonNullable<typeof document.modelContext>['getTools']>>[number],
+          inputJson: string,
+        ) => Promise<string | null>;
+      };
+      const tool = (await modelContext.getTools()).find((candidate) => candidate.name === toolName);
       if (!tool) throw new Error(`WebMCP tool is not registered: ${toolName}`);
-      const result = await tool.execute(toolInput, { signal: new AbortController().signal });
+      const serialized = await modelContext.executeTool(tool, JSON.stringify(toolInput));
+      const result = serialized ? JSON.parse(serialized) : null;
       const dataTools = new Set([
         'groundwork_search_locations',
         'groundwork_get_workspace',
@@ -20,35 +27,15 @@ async function executeWebMcpTool(page: Page, name: string, input: Record<string,
 
 test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) => {
   test.setTimeout(90_000);
-  await page.addInitScript(() => {
-    const tools = new Map<
-      string,
-      { execute: (input: Record<string, unknown>, options: { signal: AbortSignal }) => unknown }
-    >();
-    const modelContext = new EventTarget() as EventTarget & {
-      registerTool: (
-        tool: {
-          name: string;
-          execute: (input: Record<string, unknown>, options: { signal: AbortSignal }) => unknown;
-        },
-        options?: { signal?: AbortSignal },
-      ) => Promise<void>;
-      getTools: () => Promise<unknown[]>;
-    };
-    modelContext.registerTool = async (tool, options) => {
-      tools.set(tool.name, tool);
-      options?.signal?.addEventListener('abort', () => tools.delete(tool.name), { once: true });
-    };
-    modelContext.getTools = async () => [...tools.keys()];
-    Object.defineProperty(document, 'modelContext', { configurable: true, value: modelContext });
-    Object.defineProperty(window, '__groundworkTools', { value: tools });
-  });
-
   await page.goto('/app');
-  await expect(page.getByTitle('Browser assistant connected')).toBeVisible();
+  await expect(page.getByTitle('MCP-B browser assistant tools ready')).toBeVisible();
   await expect
     .poll(() =>
-      page.evaluate(() => (window as any).__groundworkTools.has('groundwork_get_workspace')),
+      page.evaluate(async () =>
+        (await document.modelContext!.getTools()).some(
+          (tool) => tool.name === 'groundwork_get_workspace',
+        ),
+      ),
     )
     .toBe(true);
 
@@ -72,7 +59,11 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
   });
   await expect
     .poll(() =>
-      page.evaluate(() => (window as any).__groundworkTools.has('groundwork_add_bike_condition')),
+      page.evaluate(async () =>
+        (await document.modelContext!.getTools()).some(
+          (tool) => tool.name === 'groundwork_add_bike_condition',
+        ),
+      ),
     )
     .toBe(true);
 
@@ -88,17 +79,25 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
   });
   await expect
     .poll(() =>
-      page.evaluate(() =>
-        (window as any).__groundworkTools.has('groundwork_start_preference_draw'),
+      page.evaluate(async () =>
+        (await document.modelContext!.getTools()).some(
+          (tool) => tool.name === 'groundwork_start_preference_draw',
+        ),
       ),
     )
     .toBe(true);
   await page.evaluate(() => {
-    const tool = (window as any).__groundworkTools.get('groundwork_start_preference_draw');
-    (window as any).__groundworkDrawPromise = tool.execute(
-      {},
-      { signal: new AbortController().signal },
-    );
+    (window as any).__groundworkDrawPromise = (async () => {
+      const context = document.modelContext as typeof document.modelContext & {
+        executeTool: (tool: unknown, inputJson: string) => Promise<string | null>;
+      };
+      const tool = (await context.getTools()).find(
+        (candidate) => candidate.name === 'groundwork_start_preference_draw',
+      );
+      if (!tool) throw new Error('Drawing tool is unavailable.');
+      const serialized = await context.executeTool(tool, '{}');
+      return serialized ? JSON.parse(serialized) : null;
+    })();
   });
   await expect(page.getByText(/Draw your preferred area/u)).toBeVisible();
   const mapBounds = await page.getByRole('region', { name: 'Map' }).boundingBox();
@@ -123,14 +122,22 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
   await expect(page.getByText(/Draw your preferred area/u)).toHaveCount(0);
   await expect
     .poll(() =>
-      page.evaluate(() => (window as any).__groundworkTools.has('groundwork_combine_conditions')),
+      page.evaluate(async () =>
+        (await document.modelContext!.getTools()).some(
+          (tool) => tool.name === 'groundwork_combine_conditions',
+        ),
+      ),
     )
     .toBe(true);
 
   await executeWebMcpTool(page, 'groundwork_combine_conditions');
   await expect
     .poll(() =>
-      page.evaluate(() => (window as any).__groundworkTools.has('groundwork_rank_candidates')),
+      page.evaluate(async () =>
+        (await document.modelContext!.getTools()).some(
+          (tool) => tool.name === 'groundwork_rank_candidates',
+        ),
+      ),
     )
     .toBe(true);
   await executeWebMcpTool(page, 'groundwork_rank_candidates');

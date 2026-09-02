@@ -101,8 +101,10 @@ test.describe('SweetSpot manual flow', () => {
     await expect(page.getByRole('button', { name: 'Retry data' })).toBeVisible();
     await page.getByRole('button', { name: 'Retry data' }).click();
     await expect(page.getByText('Search San Francisco')).toBeVisible({ timeout: 20_000 });
-    await page.getByLabel('Search San Francisco').fill('7 Mile House Sports Bar');
+    await page.getByLabel('Search San Francisco').fill('San Francisco City Hall');
     await page.getByRole('button', { name: 'Search', exact: true }).click();
-    await expect(page.getByText(/No match found/u)).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: /San Francisco City Hall Place/u }),
+    ).toBeVisible();
   });
 });

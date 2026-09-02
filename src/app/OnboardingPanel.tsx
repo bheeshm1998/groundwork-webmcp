@@ -112,7 +112,7 @@ export function OnboardingPanel() {
             id="office-search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Street or landmark"
+            placeholder="Company, address, street, or landmark"
             minLength={2}
             autoFocus={!office}
           />

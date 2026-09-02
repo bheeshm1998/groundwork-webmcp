@@ -10,8 +10,10 @@ const worker = vi.hoisted(() => ({
   isCoordinateSupported: vi.fn(),
   analyze: vi.fn(),
 }));
+const geocoder = vi.hoisted(() => ({ searchOnlineLocations: vi.fn() }));
 
 vi.mock('../geo-worker/client', () => ({ getGeoWorker: () => worker }));
+vi.mock('./geocoder', () => ({ searchOnlineLocations: geocoder.searchOnlineLocations }));
 
 import { workspaceService } from './workspace-service';
 
@@ -102,6 +104,7 @@ describe('WorkspaceService', () => {
       ],
     });
     worker.isCoordinateSupported.mockReset().mockResolvedValue(true);
+    geocoder.searchOnlineLocations.mockReset().mockResolvedValue([]);
     worker.analyze
       .mockReset()
       .mockImplementation(async (canonical: CanonicalWorkspace) => analysisFor(canonical));
@@ -154,6 +157,31 @@ describe('WorkspaceService', () => {
       true,
     );
     expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull();
+  });
+
+  it('falls back to online OSM geocoding for company names absent from the local extract', async () => {
+    geocoder.searchOnlineLocations.mockResolvedValue([
+      {
+        id: 'photon-N-123',
+        label: 'Google — 345 Spear Street, San Francisco, California',
+        coordinates: [-122.3895538, 37.7894073],
+        kind: 'poi',
+      },
+    ]);
+    await workspaceService.initialize();
+
+    const result = await workspaceService.query({
+      type: 'search-locations',
+      query: 'Google San Francisco',
+    });
+
+    expect(geocoder.searchOnlineLocations).toHaveBeenCalledWith('sf', 'Google San Francisco');
+    expect(result.data).toEqual([
+      expect.objectContaining({
+        label: 'Google — 345 Spear Street, San Francisco, California',
+        coordinates: [-122.3895538, 37.7894073],
+      }),
+    ]);
   });
 
   it('loads Hyderabad independently and rejects coordinates from the other city', async () => {

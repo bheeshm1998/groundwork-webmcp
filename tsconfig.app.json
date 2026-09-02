@@ -17,7 +17,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "types": ["vite/client", "vitest/globals", "webmcp-types"]
+    "types": ["vite/client", "vitest/globals", "@mcp-b/webmcp-types"]
   },
   "include": ["src", "tests"]
 }

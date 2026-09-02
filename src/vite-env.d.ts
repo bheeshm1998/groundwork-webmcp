@@ -2,6 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_MAPTILER_KEY?: string;
+  readonly VITE_GEOCODER_URL?: string;
   readonly VITE_WEBMCP_ORIGIN_TRIAL_TOKEN?: string;
 }
 

@@ -8,10 +8,7 @@ import { WebMCPBridge } from './WebMCPBridge';
 
 type RegisteredTool = {
   name: string;
-  execute: (
-    input: Record<string, unknown>,
-    options: { signal: AbortSignal },
-  ) => Promise<unknown> | unknown;
+  execute: (input: Record<string, unknown>) => Promise<unknown> | unknown;
 };
 
 const tools = new Map<string, RegisteredTool>();
@@ -120,9 +117,7 @@ describe('WebMCPBridge', () => {
     render(<WebMCPBridge />);
     await waitFor(() => expect(tools.has('groundwork_search_locations')).toBe(true));
 
-    await tools
-      .get('groundwork_search_locations')!
-      .execute({ query: '1 Market' }, { signal: new AbortController().signal });
+    await tools.get('groundwork_search_locations')!.execute({ query: '1 Market' });
     expect(query).toHaveBeenCalledWith({ type: 'search-locations', query: '1 Market' });
 
     act(() => {
@@ -132,19 +127,35 @@ describe('WebMCPBridge', () => {
       });
     });
     await waitFor(() => expect(tools.has('groundwork_add_bike_condition')).toBe(true));
-    await tools
-      .get('groundwork_add_bike_condition')!
-      .execute({ maxMinutes: 25 }, { signal: new AbortController().signal });
+    await tools.get('groundwork_add_bike_condition')!.execute({ maxMinutes: 25 });
 
     expect(execute).toHaveBeenCalledWith(
       { type: 'add-bike', maxMinutes: 25, actor: 'agent' },
       expect.any(AbortSignal),
     );
     await expect(
-      tools
-        .get('groundwork_add_bike_condition')!
-        .execute({ maxMinutes: 'fast' }, { signal: new AbortController().signal }),
+      tools.get('groundwork_add_bike_condition')!.execute({ maxMinutes: 'fast' }),
     ).resolves.toEqual({ ok: false, message: 'Invalid tool input.' });
+  });
+
+  it('does not unregister a mutation while an operation is in flight', async () => {
+    useWorkspaceStore.setState({
+      canonical: { ...structuredClone(EMPTY_CANONICAL), office: SAMPLE_OFFICE },
+    });
+    render(<WebMCPBridge />);
+    await waitFor(() => expect(tools.has('groundwork_add_bike_condition')).toBe(true));
+
+    act(() => useWorkspaceStore.setState({ operation: 'calculating' }));
+    await waitFor(() => expect(useWorkspaceStore.getState().operation).toBe('calculating'));
+    expect(tools.has('groundwork_add_bike_condition')).toBe(true);
+
+    act(() =>
+      useWorkspaceStore.setState({
+        canonical: structuredClone(EMPTY_CANONICAL),
+        operation: 'idle',
+      }),
+    );
+    await waitFor(() => expect(tools.has('groundwork_add_bike_condition')).toBe(false));
   });
 
   it('exposes analysis and candidate tools only when derived results are ready', async () => {

@@ -15,6 +15,8 @@ The committed dataset contains only fetched public records:
 
 Each city has an independent manifest: [`public/data/sf/metadata.json`](public/data/sf/metadata.json) and [`public/data/hyderabad/metadata.json`](public/data/hyderabad/metadata.json). They record source URLs, extract dates, SHA-256 checksums, versioned asset filenames, record counts, and graph sizes. The build stops if a source cannot be fetched, an extract is unexpectedly small, or the city-specific graph budget is exceeded. There is no synthetic fallback.
 
+Destination search uses the bundled city index first. Company names and street addresses that are absent from the extract fall back to a city-bounded Photon-compatible OpenStreetMap geocoder. Set `VITE_GEOCODER_URL` to a supported or self-hosted Photon endpoint for production traffic.
+
 ## Rebuild the dataset
 
 Requirements: Node.js 22+ and npm. For the preferred Geofabrik workflow, install `osmium-tool`, download a timestamped Northern California PBF from Geofabrik, verify it, and set both `OSM_PBF_PATH` and `OSM_PBF_SOURCE_URL` (the exact timestamped download URL). On machines without `osmium`, the builder uses the Overpass fallback and stores the checksum-pinned raw response in `data/source`.

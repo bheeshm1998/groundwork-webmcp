@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { MaybePromise, ModelContextTool } from '@mcp-b/webmcp-types';
 import { z } from 'zod';
 import { getCapabilities, type Capability } from '../domain/capabilities';
 import { CoordinateSchema } from '../domain/schemas';
@@ -7,7 +8,7 @@ import { workspaceService } from '../domain/workspace-service';
 import { requestPreferenceDraw } from '../map/drawing';
 import { useWorkspaceStore } from '../store/workspace-store';
 
-const objectSchema = (properties: object, required: string[] = []) => ({
+const objectSchema = (properties: Readonly<Record<string, unknown>>, required: string[] = []) => ({
   type: 'object',
   properties,
   required,
@@ -30,6 +31,13 @@ const updateMinutesProperty = {
   minimum: 1,
   maximum: 90,
   description: 'One-way time limit in minutes; bicycle conditions require at least 5.',
+};
+
+type GroundworkTool = Omit<ModelContextTool<Record<string, unknown>>, 'execute'> & {
+  execute: (
+    input: Record<string, unknown>,
+    registrationSignal: AbortSignal,
+  ) => MaybePromise<unknown>;
 };
 
 async function safeToolResult<T>(operation: () => Promise<T> | T) {
@@ -61,7 +69,8 @@ export function WebMCPBridge() {
   const registrations = useRef(new Map<Capability, AbortController>());
 
   useEffect(() => {
-    if (!document.modelContext || !initialized) return;
+    const modelContext = document.modelContext;
+    if (!modelContext || !initialized) return;
     const capabilities = getCapabilities(
       canonical,
       derived,
@@ -70,30 +79,36 @@ export function WebMCPBridge() {
       operation,
       drawingReady,
     );
-    const register = (
-      capability: Parameters<typeof capabilities.has>[0],
-      tool: WebMCP.ModelContextTool,
-    ) => {
+    const register = (capability: Parameters<typeof capabilities.has>[0], tool: GroundworkTool) => {
       if (!capabilities.has(capability) || registrations.current.has(capability)) return;
       const controller = new AbortController();
       registrations.current.set(capability, controller);
-      void document.modelContext
-        ?.registerTool(tool, { signal: controller.signal })
-        .catch(() => registrations.current.delete(capability));
+      const browserTool: ModelContextTool<Record<string, unknown>> = {
+        ...tool,
+        execute: (input) => tool.execute(input, controller.signal),
+      };
+      const { inputSchema, ...toolWithoutSchema } = browserTool;
+      const registration = inputSchema
+        ? modelContext.registerTool(
+            { ...toolWithoutSchema, inputSchema },
+            { signal: controller.signal },
+          )
+        : modelContext.registerTool(toolWithoutSchema, { signal: controller.signal });
+      void registration.catch(() => registrations.current.delete(capability));
     };
 
     register('get-workspace', {
       name: 'groundwork_get_workspace',
       title: 'Read SweetSpot workspace',
       description:
-        'Read a compact summary of the visible SweetSpot map workspace and current results.',
+        'Read the authoritative visible workspace, supported analysis types, and current results. Call this before presenting recommendations; never claim a constraint that is absent from this response.',
       annotations: { readOnlyHint: true },
       execute: () => workspaceService.query({ type: 'get-workspace' }),
     });
     register('search-locations', {
       name: 'groundwork_search_locations',
       title: `Search ${city.name} locations`,
-      description: `Search for an office location inside ${city.name} without changing the workspace.`,
+      description: `Search local and online OpenStreetMap results for a company, address, street, or landmark inside ${city.name} without changing the workspace. If more than one plausible office is returned, ask the user which one they mean before setting it.`,
       inputSchema: objectSchema({ query: { type: 'string', minLength: 2 } }, ['query']),
       annotations: { readOnlyHint: true, untrustedContentHint: true },
       execute: (input) =>
@@ -112,7 +127,7 @@ export function WebMCPBridge() {
         { label: { type: 'string' }, longitude: { type: 'number' }, latitude: { type: 'number' } },
         ['label', 'longitude', 'latitude'],
       ),
-      execute: (input, { signal }) =>
+      execute: (input, signal) =>
         safeToolResult(() =>
           workspaceService.execute(
             {
@@ -132,7 +147,7 @@ export function WebMCPBridge() {
       title: 'Add bicycle condition',
       description: 'Create a deterministic bicycle travel area from the current office.',
       inputSchema: objectSchema({ maxMinutes: bikeMinutesProperty }, ['maxMinutes']),
-      execute: (input, { signal }) =>
+      execute: (input, signal) =>
         safeToolResult(() =>
           workspaceService.execute(
             {
@@ -156,7 +171,7 @@ export function WebMCPBridge() {
         },
         ['category', 'maxMinutes'],
       ),
-      execute: (input, { signal }) =>
+      execute: (input, signal) =>
         safeToolResult(() =>
           workspaceService.execute(
             {
@@ -177,7 +192,7 @@ export function WebMCPBridge() {
       title: 'Ask the user to draw',
       description:
         'Put the live map into polygon drawing mode and wait for the user to draw the area they would consider.',
-      execute: async (_input, { signal }) => {
+      execute: async (_input, signal) => {
         return safeToolResult(async () => {
           const geometry = await requestPreferenceDraw(signal);
           const result = await workspaceService.execute(
@@ -197,7 +212,7 @@ export function WebMCPBridge() {
         'id',
         'maxMinutes',
       ]),
-      execute: (input, { signal }) =>
+      execute: (input, signal) =>
         safeToolResult(() =>
           workspaceService.execute(
             {
@@ -215,7 +230,7 @@ export function WebMCPBridge() {
       title: 'Delete condition',
       description: 'Delete one condition from the analysis by ID.',
       inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
-      execute: (input, { signal }) =>
+      execute: (input, signal) =>
         safeToolResult(() =>
           workspaceService.execute(
             {
@@ -235,7 +250,7 @@ export function WebMCPBridge() {
         'id',
         'visible',
       ]),
-      execute: (input, { signal }) =>
+      execute: (input, signal) =>
         safeToolResult(() =>
           workspaceService.execute(
             {
@@ -252,7 +267,7 @@ export function WebMCPBridge() {
       name: 'groundwork_combine_conditions',
       title: 'Combine conditions',
       description: 'Intersect all current conditions to create the feasible region.',
-      execute: (_input, { signal }) =>
+      execute: (_input, signal) =>
         workspaceService.execute({ type: 'combine', actor: 'agent' }, signal),
     });
     register('recalculate', {
@@ -260,14 +275,14 @@ export function WebMCPBridge() {
       title: 'Recalculate analysis',
       description:
         'Refresh stale network-dependent results after the office or bicycle limit changes.',
-      execute: (_input, { signal }) =>
+      execute: (_input, signal) =>
         workspaceService.execute({ type: 'recalculate', actor: 'agent' }, signal),
     });
     register('rank', {
       name: 'groundwork_rank_candidates',
       title: 'Rank candidates',
       description: 'Rank three balanced candidate areas inside the fresh feasible region.',
-      execute: (_input, { signal }) =>
+      execute: (_input, signal) =>
         workspaceService.execute({ type: 'rank', actor: 'agent' }, signal),
     });
     register('analyze-restriction', {
@@ -283,7 +298,7 @@ export function WebMCPBridge() {
       title: 'Select candidate',
       description: 'Select a ranked candidate by ID.',
       inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
-      execute: (input, { signal }) =>
+      execute: (input, signal) =>
         safeToolResult(() =>
           workspaceService.execute(
             {
@@ -314,7 +329,7 @@ export function WebMCPBridge() {
       title: 'Remove candidate',
       description: 'Remove a candidate and fill its place with the next-ranked area.',
       inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
-      execute: (input, { signal }) =>
+      execute: (input, signal) =>
         safeToolResult(() =>
           workspaceService.execute(
             {
@@ -330,7 +345,7 @@ export function WebMCPBridge() {
       name: 'groundwork_undo',
       title: 'Undo last change',
       description: 'Undo the single most recent meaningful workspace change.',
-      execute: (_input, { signal }) =>
+      execute: (_input, signal) =>
         workspaceService.execute({ type: 'undo', actor: 'agent' }, signal),
     });
     register('create-share-link', {
@@ -341,10 +356,14 @@ export function WebMCPBridge() {
       execute: () => workspaceService.query({ type: 'create-share-link' }),
     });
 
-    for (const [capability, controller] of registrations.current) {
-      if (!capabilities.has(capability)) {
-        controller.abort();
-        registrations.current.delete(capability);
+    // Removing the registration that started a long-running command aborts that same invocation.
+    // Keep the current tool surface stable until calculation/drawing finishes, then reconcile it.
+    if (operation !== 'calculating' && operation !== 'drawing') {
+      for (const [capability, controller] of registrations.current) {
+        if (!capabilities.has(capability)) {
+          controller.abort();
+          registrations.current.delete(capability);
+        }
       }
     }
   }, [canonical, city.name, derived, drawingReady, freshness, hasUndo, initialized, operation]);

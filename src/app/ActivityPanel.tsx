@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { workspaceService } from '../domain/workspace-service';
 import { useWorkspaceStore } from '../store/workspace-store';
+import { getWebMcpStatusLabel } from '../webmcp/runtime';
 
 export function ActivityPanel() {
   const [shareMessage, setShareMessage] = useState('');
@@ -92,7 +93,7 @@ export function ActivityPanel() {
 
       <p className="workspace-footnote">
         {document.modelContext
-          ? 'Browser assistant connected'
+          ? getWebMcpStatusLabel()
           : 'Manual Mode | Browser Assistant not connected'}
       </p>
     </div>

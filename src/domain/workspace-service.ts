@@ -19,6 +19,7 @@ import {
 } from '../sharing/share';
 import { useWorkspaceStore, workspaceSnapshot } from '../store/workspace-store';
 import { cancelPreferenceDraw } from '../map/drawing';
+import { searchOnlineLocations } from './geocoder';
 
 function id(prefix: string): string {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
@@ -107,6 +108,63 @@ function throwIfAborted(signal?: AbortSignal): void {
 
 function isAbort(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function normalizedSearchText(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .toLowerCase()
+    .replace(/\bst\.?\b/gu, 'street')
+    .replace(/\bave\.?\b/gu, 'avenue')
+    .replace(/\bblvd\.?\b/gu, 'boulevard')
+    .replace(/[^a-z0-9]+/gu, ' ')
+    .trim();
+}
+
+function searchTokens(query: string, cityId: CityId): string[] {
+  const ignored = new Set([
+    ...normalizedSearchText(CITIES[cityId].name).split(' '),
+    ...normalizedSearchText(CITIES[cityId].country).split(' '),
+    'ca',
+    'california',
+    'telangana',
+    'india',
+  ]);
+  const tokens = normalizedSearchText(query)
+    .split(' ')
+    .filter((token) => token && !ignored.has(token));
+  return tokens.length ? tokens : normalizedSearchText(query).split(' ').filter(Boolean);
+}
+
+function localSearchScore(label: string, query: string, cityId: CityId): number {
+  const normalizedLabel = normalizedSearchText(label);
+  const normalizedQuery = normalizedSearchText(query);
+  if (normalizedLabel === normalizedQuery) return 1_000;
+  if (normalizedLabel.startsWith(normalizedQuery)) return 900;
+  if (normalizedLabel.includes(normalizedQuery)) return 800;
+
+  const labelTokens = normalizedLabel.split(' ');
+  const queryTokens = searchTokens(query, cityId);
+  const matched = queryTokens.filter((queryToken) =>
+    labelTokens.some(
+      (labelToken) => labelToken === queryToken || labelToken.startsWith(queryToken),
+    ),
+  ).length;
+  if (matched === queryTokens.length) return 700 + matched;
+  const coverage = matched / queryTokens.length;
+  return coverage >= 0.66 ? 400 + coverage * 100 : 0;
+}
+
+function uniqueLocations(results: LocationResult[]): LocationResult[] {
+  const unique = new Map<string, LocationResult>();
+  for (const match of results) {
+    const coordinateKey = match.coordinates.map((value) => value.toFixed(5)).join(',');
+    const key = `${normalizedSearchText(match.label)}:${coordinateKey}`;
+    if (!unique.has(key)) unique.set(key, match);
+    if (unique.size === 8) break;
+  }
+  return [...unique.values()];
 }
 
 export class WorkspaceService {
@@ -468,14 +526,34 @@ export class WorkspaceService {
             feasibleAreaKm2: state.derived.feasibleAreaKm2,
             candidates: state.derived.candidates,
             freshness: state.analysisFreshness,
+            supportedAnalysis: {
+              commuteModes: ['bicycle'],
+              nearbyCategories: ['grocery', 'park'],
+              unsupported: [
+                'schools',
+                'straight-line distance limits',
+                'public transit',
+                'driving',
+                'housing listings',
+              ],
+              instruction:
+                'Only claim constraints represented by the current office, conditions, and candidate metrics. Ask the user before choosing among ambiguous location matches, and disclose unsupported constraints.',
+            },
           },
         };
-      case 'search-locations':
+      case 'search-locations': {
+        const matches = await this.searchLocations(query.query);
         return {
           ok: true,
-          message: 'Location matches.',
-          data: await this.searchLocations(query.query),
+          message:
+            matches.length === 0
+              ? 'No supported location matched. Do not guess coordinates; ask for a more specific company name, address, street, or landmark.'
+              : matches.length === 1
+                ? 'One location matched.'
+                : 'Multiple locations matched. Ask the user which result they mean before setting the office.',
+          data: matches,
         };
+      }
       case 'explain-candidate': {
         const candidate = state.derived.candidates.find(
           ({ id: candidateId }) => candidateId === query.id,
@@ -518,22 +596,22 @@ export class WorkspaceService {
   }
 
   private async searchLocations(query: string): Promise<LocationResult[]> {
-    const normalized = query.trim().toLowerCase();
+    const normalized = normalizedSearchText(query);
     if (normalized.length < 2) return [];
-    const startsWith = this.searchIndex.filter(({ label }) =>
-      label.toLowerCase().startsWith(normalized),
-    );
-    const contains = this.searchIndex.filter(
-      ({ label }) =>
-        !label.toLowerCase().startsWith(normalized) && label.toLowerCase().includes(normalized),
-    );
-    const unique = new Map<string, LocationResult>();
-    for (const match of [...startsWith, ...contains]) {
-      const key = `${match.kind}:${match.label.toLowerCase()}:${match.coordinates.join(',')}`;
-      if (!unique.has(key)) unique.set(key, match);
-      if (unique.size === 8) break;
-    }
-    return [...unique.values()];
+    const cityId = workspaceSnapshot().cityId;
+    const local = this.searchIndex
+      .map((match) => ({ match, score: localSearchScore(match.label, query, cityId) }))
+      .filter(({ score }) => score > 0)
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          a.match.label.localeCompare(b.match.label) ||
+          a.match.id.localeCompare(b.match.id),
+      );
+    const hasStrongLocalMatch = local.some(({ score }) => score >= 700);
+    const shouldSearchOnline = !hasStrongLocalMatch || /\d/u.test(normalized);
+    const online = shouldSearchOnline ? await searchOnlineLocations(cityId, query) : [];
+    return uniqueLocations([...online, ...local.map(({ match }) => match)]);
   }
 }
 

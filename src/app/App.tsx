@@ -9,12 +9,14 @@ import { useWorkspaceStore } from '../store/workspace-store';
 import { WebMCPBridge } from '../webmcp/WebMCPBridge';
 import { cancelPreferenceDraw } from '../map/drawing';
 import { cityFromLocation } from '../domain/cities';
+import { getWebMcpRuntime, getWebMcpStatusLabel } from '../webmcp/runtime';
 
 const MapView = lazy(() =>
   import('../map/MapView').then((module) => ({ default: module.MapView })),
 );
 
 function WorkspaceApp() {
+  const webMcpRuntime = getWebMcpRuntime();
   const requestedCityId = cityFromLocation();
   const initialized = useWorkspaceStore((state) => state.initialized);
   const operation = useWorkspaceStore((state) => state.operation);
@@ -119,10 +121,10 @@ function WorkspaceApp() {
             Workspace
           </button>
           <span
-            className={`connection-indicator ${document.modelContext ? 'connected' : ''}`}
+            className={`connection-indicator ${webMcpRuntime !== 'unavailable' ? 'connected' : ''}`}
             title={
-              document.modelContext
-                ? 'Browser assistant connected'
+              webMcpRuntime !== 'unavailable'
+                ? getWebMcpStatusLabel()
                 : `Manual mode • local data from ${metadata?.sources[0]?.extractDate ?? 'loading'}`
             }
           />
