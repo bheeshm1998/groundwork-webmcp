@@ -32,7 +32,7 @@ export interface SerializedAdjacencyGraph {
 
 export type SerializedGraph = CompactGraphSpec | SerializedAdjacencyGraph;
 
-function distanceKm(a: Coordinate, b: Coordinate): number {
+export function coordinateDistanceKm(a: Coordinate, b: Coordinate): number {
   const latScale = 111.32;
   const lngScale = Math.cos(((a[1] + b[1]) / 2) * (Math.PI / 180)) * 111.32;
   return Math.hypot((a[0] - b[0]) * lngScale, (a[1] - b[1]) * latScale);
@@ -88,7 +88,9 @@ export function expandCompactGraph(spec: CompactGraphSpec): GraphData {
         if (!sourceCoordinate || !targetCoordinate) continue;
         const speedFactor = row % 5 === 0 && dx < 0 ? 0.78 : 1;
         const minutes =
-          (distanceKm(sourceCoordinate, targetCoordinate) / (spec.bikeSpeedKph * speedFactor)) * 60;
+          (coordinateDistanceKm(sourceCoordinate, targetCoordinate) /
+            (spec.bikeSpeedKph * speedFactor)) *
+          60;
         adjacency[source]?.push({ target, weight: minutes });
       }
     }
@@ -238,6 +240,14 @@ export function nearestNodeForMode(
   coordinate: Coordinate,
   mode?: TravelMode,
 ): number {
+  return nearestNodeForModeWithDistance(graph, coordinate, mode).node;
+}
+
+export function nearestNodeForModeWithDistance(
+  graph: GraphData,
+  coordinate: Coordinate,
+  mode?: TravelMode,
+): { node: number; distanceKm: number } {
   let closest = 0;
   let closestSquared = Number.POSITIVE_INFINITY;
   const lngScale = Math.cos(coordinate[1] * (Math.PI / 180));
@@ -261,7 +271,16 @@ export function nearestNodeForMode(
       closest = index;
     }
   }
-  return closest;
+  return {
+    node: closest,
+    distanceKm: coordinateDistanceKm(coordinate, [graph.lng[closest]!, graph.lat[closest]!]),
+  };
+}
+
+export function reachableNodeCount(distances: Float32Array): number {
+  let count = 0;
+  for (const value of distances) if (Number.isFinite(value)) count += 1;
+  return count;
 }
 
 class MinHeap {

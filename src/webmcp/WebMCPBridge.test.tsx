@@ -81,6 +81,7 @@ function resetStore() {
     error: null,
     initialized: true,
     activeAgentAction: null,
+    calculationLabel: null,
   });
 }
 
@@ -104,6 +105,7 @@ describe('WebMCPBridge', () => {
     expect([...tools.keys()].sort()).toEqual([
       'add_destination',
       'add_place_condition',
+      'configure_plan',
       'create_share_link',
       'get_workspace',
       'request_user_drawing',
@@ -125,7 +127,10 @@ describe('WebMCPBridge', () => {
     await waitFor(() => expect(tools.has('search_locations')).toBe(true));
 
     await tools.get('search_locations')?.execute({ query: 'City Hall' });
-    expect(query).toHaveBeenCalledWith({ type: 'search-locations', query: 'City Hall' });
+    expect(query).toHaveBeenCalledWith(
+      { type: 'search-locations', query: 'City Hall' },
+      expect.any(AbortSignal),
+    );
 
     act(() => {
       useWorkspaceStore.setState({
@@ -218,7 +223,7 @@ describe('WebMCPBridge', () => {
     });
     render(<WebMCPBridge />);
 
-    await waitFor(() => expect(tools.has('rank_areas')).toBe(true));
+    await waitFor(() => expect(tools.has('find_matching_areas')).toBe(true));
     expect(tools.has('analyze_restriction')).toBe(true);
     expect(tools.has('explain_area')).toBe(true);
     expect(tools.has('select_area')).toBe(true);
@@ -228,6 +233,6 @@ describe('WebMCPBridge', () => {
 
     act(() => useWorkspaceStore.setState({ analysisFreshness: 'stale' }));
     await waitFor(() => expect(tools.has('recalculate')).toBe(true));
-    expect(tools.has('rank_areas')).toBe(false);
+    expect(tools.has('find_matching_areas')).toBe(true);
   });
 });

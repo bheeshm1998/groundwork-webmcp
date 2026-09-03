@@ -8,6 +8,7 @@ import type {
 export type Capability =
   | 'get_workspace'
   | 'search_locations'
+  | 'configure_plan'
   | 'add_destination'
   | 'remove_destination'
   | 'add_travel_condition'
@@ -16,9 +17,8 @@ export type Capability =
   | 'update_condition'
   | 'delete_condition'
   | 'set_layer_visibility'
-  | 'combine_conditions'
+  | 'find_matching_areas'
   | 'recalculate'
-  | 'rank_areas'
   | 'analyze_restriction'
   | 'select_area'
   | 'explain_area'
@@ -43,6 +43,7 @@ export function getCapabilities(
   if (operation === 'calculating' || operation === 'drawing') return capabilities;
 
   if (canonical.destinations.length < 4) capabilities.add('add_destination');
+  capabilities.add('configure_plan');
   if (canonical.destinations.length > 0) capabilities.add('remove_destination');
   if (canonical.conditions.length < 20) {
     capabilities.add('add_place_condition');
@@ -54,10 +55,9 @@ export function getCapabilities(
     capabilities.add('delete_condition');
     capabilities.add('set_layer_visibility');
   }
-  if (canonical.conditions.length >= 2) capabilities.add('combine_conditions');
+  if (canonical.conditions.length >= 2) capabilities.add('find_matching_areas');
   if (freshness === 'stale') capabilities.add('recalculate');
   if (freshness === 'fresh' && derived.feasibleRegion) {
-    capabilities.add('rank_areas');
     capabilities.add('analyze_restriction');
   }
   if (derived.candidates.length > 0) {

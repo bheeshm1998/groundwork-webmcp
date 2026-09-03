@@ -83,6 +83,40 @@ const UpdateInputSchema = z
       groceryType !== undefined,
   );
 
+const ConfigurePlanInputSchema = z.object({
+  destinations: z
+    .array(
+      z.object({
+        key: z.string().min(1),
+        label: z.string().min(1),
+        longitude: z.number().min(-180).max(180),
+        latitude: z.number().min(-90).max(90),
+      }),
+    )
+    .max(4),
+  conditions: z
+    .array(
+      z.discriminatedUnion('kind', [
+        z.object({
+          kind: z.literal('travel'),
+          destinationKey: z.string().min(1),
+          mode: z.enum(TRAVEL_MODES),
+          maxMinutes: z.number().min(5).max(90),
+        }),
+        z.object({
+          kind: z.literal('access'),
+          category: z.enum(PLACE_CATEGORIES),
+          mode: z.enum(ACCESS_MODES),
+          maxMinutes: z.number().min(1).max(45),
+          groceryType: z.enum(['supermarket', 'supermarket_or_grocery']).optional(),
+        }),
+      ]),
+    )
+    .max(20),
+  replaceExisting: z.boolean().optional(),
+  findMatches: z.boolean().optional(),
+});
+
 export function WebMCPBridge() {
   const canonical = useWorkspaceStore((state) => state.canonical);
   const derived = useWorkspaceStore((state) => state.derived);
@@ -97,15 +131,10 @@ export function WebMCPBridge() {
 
   useEffect(() => {
     const modelContext = document.modelContext;
-    if (!modelContext || !initialized) return;
-    const capabilities = getCapabilities(
-      canonical,
-      derived,
-      freshness,
-      hasUndo,
-      operation,
-      drawingReady,
-    );
+    if (!modelContext) return;
+    const capabilities: Set<Capability> = initialized
+      ? getCapabilities(canonical, derived, freshness, hasUndo, operation, drawingReady)
+      : new Set<Capability>(['get_workspace']);
     const register = (capability: Capability, tool: SweetSpotTool) => {
       if (!capabilities.has(capability) || registrations.current.has(capability)) return;
       const controller = new AbortController();
@@ -141,14 +170,95 @@ export function WebMCPBridge() {
       description: `Search local and online OpenStreetMap results inside ${city.name} without changing the workspace. Ask before choosing among ambiguous matches; never guess coordinates.`,
       inputSchema: objectSchema({ query: { type: 'string', minLength: 2 } }, ['query']),
       annotations: { readOnlyHint: true, untrustedContentHint: true },
-      execute: (input) =>
+      execute: (input, signal) =>
         runAgentAction('Searching locations', () =>
           safeToolResult(() =>
-            workspaceService.query({
-              type: 'search-locations',
-              query: z.string().min(2).parse(input.query),
-            }),
+            workspaceService.query(
+              {
+                type: 'search-locations',
+                query: z.string().min(2).parse(input.query),
+              },
+              signal,
+            ),
           ),
+        ),
+    });
+    register('configure_plan', {
+      name: 'configure_plan',
+      title: 'Build a complete SweetSpot plan',
+      description:
+        'Atomically add resolved destinations and travel/place priorities, then find and rank matching areas in one calculation. Use search_locations first for every destination. destinationKey values are temporary references used by travel conditions.',
+      inputSchema: objectSchema(
+        {
+          destinations: {
+            type: 'array',
+            maxItems: 4,
+            items: objectSchema(
+              {
+                key: { type: 'string' },
+                label: { type: 'string' },
+                longitude: { type: 'number' },
+                latitude: { type: 'number' },
+              },
+              ['key', 'label', 'longitude', 'latitude'],
+            ),
+          },
+          conditions: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 20,
+            items: {
+              oneOf: [
+                objectSchema(
+                  {
+                    kind: { const: 'travel' },
+                    destinationKey: { type: 'string' },
+                    mode: { type: 'string', enum: [...TRAVEL_MODES] },
+                    maxMinutes: travelMinutesProperty,
+                  },
+                  ['kind', 'destinationKey', 'mode', 'maxMinutes'],
+                ),
+                objectSchema(
+                  {
+                    kind: { const: 'access' },
+                    category: { type: 'string', enum: [...PLACE_CATEGORIES] },
+                    mode: { type: 'string', enum: [...ACCESS_MODES] },
+                    maxMinutes: placeMinutesProperty,
+                    groceryType: {
+                      type: 'string',
+                      enum: ['supermarket', 'supermarket_or_grocery'],
+                    },
+                  },
+                  ['kind', 'category', 'mode', 'maxMinutes'],
+                ),
+              ],
+            },
+          },
+          replaceExisting: { type: 'boolean', default: true },
+          findMatches: { type: 'boolean', default: true },
+        },
+        ['destinations', 'conditions'],
+      ),
+      execute: (input, signal) =>
+        runAgentAction('Building your complete plan', () =>
+          safeToolResult(() => {
+            const parsed = ConfigurePlanInputSchema.parse(input);
+            return workspaceService.execute(
+              {
+                type: 'configure-plan',
+                actor: 'agent',
+                destinations: parsed.destinations.map(({ key, label, longitude, latitude }) => ({
+                  key,
+                  label,
+                  coordinates: [longitude, latitude],
+                })),
+                conditions: parsed.conditions,
+                replaceExisting: parsed.replaceExisting,
+                findMatches: parsed.findMatches,
+              },
+              signal,
+            );
+          }),
         ),
     });
     register('add_destination', {
@@ -334,13 +444,13 @@ export function WebMCPBridge() {
           ),
         ),
     });
-    register('combine_conditions', {
-      name: 'combine_conditions',
-      title: 'Combine conditions',
+    register('find_matching_areas', {
+      name: 'find_matching_areas',
+      title: 'Find and rank matching areas',
       description:
-        'Intersect all current conditions. At least 2 and no more than 20 are supported.',
+        'Intersect all current conditions and return the 3 strongest, geographically distinct candidates with their metrics. At least 2 conditions are required.',
       execute: (_input, signal) =>
-        runAgentAction('Combining priorities', () =>
+        runAgentAction('Finding and ranking matching areas', () =>
           workspaceService.execute({ type: 'combine', actor: 'agent' }, signal),
         ),
     });
@@ -351,15 +461,6 @@ export function WebMCPBridge() {
       execute: (_input, signal) =>
         runAgentAction('Updating matching areas', () =>
           workspaceService.execute({ type: 'recalculate', actor: 'agent' }, signal),
-        ),
-    });
-    register('rank_areas', {
-      name: 'rank_areas',
-      title: 'Rank areas',
-      description: 'Rank the 3 strongest balanced areas inside the fresh feasible region.',
-      execute: (_input, signal) =>
-        runAgentAction('Ranking areas', () =>
-          workspaceService.execute({ type: 'rank', actor: 'agent' }, signal),
         ),
     });
     register('analyze_restriction', {

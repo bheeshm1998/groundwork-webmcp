@@ -51,7 +51,7 @@ flowchart TB
         Engine["GeoEngine"]
         Routing["Street graph algorithms<br/>bike Dijkstra<br/>walking multi-source Dijkstra"]
         Geometry["Turf and H3<br/>polygon creation, intersection,<br/>candidate generation"]
-        Cache["50-entry condition cache"]
+        Cache["Bounded layer and max-cutoff distance caches"]
         SearchIndex["Bundled local search index"]
     end
 
@@ -233,12 +233,12 @@ The worker in [`src/geo-worker/worker.ts`](src/geo-worker/worker.ts) downloads t
 4. Clips every condition to the selected city's boundary.
 5. Intersects all condition polygons to make the feasible region.
 6. Generates candidate points inside that region.
-7. Keeps candidates at least 300 metres apart.
+7. Uses an area-scaled separation threshold, with a safe fallback, to return geographically distinct options.
 8. Prioritizes the weakest normalized margin, then average margin.
 9. Names candidates using DataSF neighborhoods and nearby OSM cross-streets.
 10. Identifies the condition removing the most otherwise-feasible area.
 
-Exact condition calculations are cached up to 50 entries.
+Exact condition layers are cached up to 50 entries. Travel and nearby-place distance fields are cached separately at their supported maximum cutoffs, so time-limit edits reuse the expensive graph traversal. Place access nodes are resolved through H3 spatial buckets. A travel destination that snaps too far from a usable road or reaches an implausibly small road component is rejected with an actionable message.
 
 ### 5. The map is a browser adapter, not the analysis engine
 
@@ -264,14 +264,14 @@ Only the visual base map depends on MapTiler or OpenFreeMap. Routing, search, ra
 Tools are capability-gated using [`src/domain/capabilities.ts`](src/domain/capabilities.ts). For example:
 
 - Bicycle tools appear only after an office exists.
-- Combine appears after at least two conditions exist.
+- Find-and-rank appears after at least two conditions exist.
 - Recalculate appears when results are stale.
 - Candidate actions appear only when candidates exist.
 - Undo appears only when an undo snapshot exists.
 
 Abort controllers unregister tools whose preconditions are no longer true.
 
-The current bridge registers **18 WebMCP tools**, although the README currently says 17.
+The current bridge registers **18 WebMCP tools**, including an atomic `configure_plan` fast path and granular editing tools.
 
 ## Network requests
 

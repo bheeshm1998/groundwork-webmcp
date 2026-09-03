@@ -16,6 +16,8 @@ async function executeWebMcpTool(page: Page, name: string, input: Record<string,
       const dataTools = new Set([
         'search_locations',
         'get_workspace',
+        'configure_plan',
+        'find_matching_areas',
         'explain_area',
         'analyze_restriction',
       ]);
@@ -32,7 +34,7 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
   await expect
     .poll(() =>
       page.evaluate(async () =>
-        (await document.modelContext!.getTools()).some((tool) => tool.name === 'get_workspace'),
+        (await document.modelContext!.getTools()).some((tool) => tool.name === 'search_locations'),
       ),
     )
     .toBe(true);
@@ -40,52 +42,36 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
   const search = await executeWebMcpTool(page, 'search_locations', {
     query: 'San Francisco City Hall',
   });
-  expect(search).toMatchObject({
-    ok: true,
-    data: [
+  expect(search).toMatchObject({ ok: true });
+  expect((search as { data: Array<{ label: string; coordinates: number[] }> }).data[0]).toEqual(
+    expect.objectContaining({
+      label: 'San Francisco City Hall',
+      coordinates: [-122.4192315, 37.7792763],
+    }),
+  );
+
+  const configured = await executeWebMcpTool(page, 'configure_plan', {
+    destinations: [
       {
+        key: 'city-hall',
         label: 'San Francisco City Hall',
-        coordinates: [-122.4192315, 37.7792763],
+        longitude: -122.4192315,
+        latitude: 37.7792763,
       },
     ],
+    conditions: [
+      { kind: 'travel', destinationKey: 'city-hall', mode: 'car', maxMinutes: 18 },
+      {
+        kind: 'access',
+        category: 'grocery',
+        mode: 'walk',
+        maxMinutes: 8,
+        groceryType: 'supermarket',
+      },
+      { kind: 'access', category: 'park', mode: 'walk', maxMinutes: 8 },
+    ],
   });
-
-  await executeWebMcpTool(page, 'add_destination', {
-    label: 'San Francisco City Hall',
-    longitude: -122.4192315,
-    latitude: 37.7792763,
-  });
-  const afterDestination = (await executeWebMcpTool(page, 'get_workspace')) as {
-    data: { destinations: Array<{ id: string }> };
-  };
-  const destinationId = afterDestination.data.destinations[0]?.id;
-  if (!destinationId) throw new Error('The destination was not added.');
-  await expect
-    .poll(() =>
-      page.evaluate(async () =>
-        (await document.modelContext!.getTools()).some(
-          (tool) => tool.name === 'add_travel_condition',
-        ),
-      ),
-    )
-    .toBe(true);
-
-  await executeWebMcpTool(page, 'add_travel_condition', {
-    destinationId,
-    mode: 'car',
-    maxMinutes: 30,
-  });
-  await executeWebMcpTool(page, 'add_place_condition', {
-    category: 'grocery',
-    mode: 'walk',
-    maxMinutes: 10,
-    groceryType: 'supermarket',
-  });
-  await executeWebMcpTool(page, 'add_place_condition', {
-    category: 'park',
-    mode: 'walk',
-    maxMinutes: 8,
-  });
+  expect(configured).toMatchObject({ ok: true, data: { freshness: 'fresh' } });
   await expect
     .poll(() =>
       page.evaluate(async () =>
@@ -142,21 +128,14 @@ test('uses WebMCP to find and rank a bikeable, walkable area', async ({ page }) 
     .poll(() =>
       page.evaluate(async () =>
         (await document.modelContext!.getTools()).some(
-          (tool) => tool.name === 'combine_conditions',
+          (tool) => tool.name === 'find_matching_areas',
         ),
       ),
     )
     .toBe(true);
 
-  await executeWebMcpTool(page, 'combine_conditions');
-  await expect
-    .poll(() =>
-      page.evaluate(async () =>
-        (await document.modelContext!.getTools()).some((tool) => tool.name === 'rank_areas'),
-      ),
-    )
-    .toBe(true);
-  await executeWebMcpTool(page, 'rank_areas');
+  const matched = await executeWebMcpTool(page, 'find_matching_areas');
+  expect(matched).toMatchObject({ ok: true, data: { freshness: 'fresh' } });
 
   const workspace = await executeWebMcpTool(page, 'get_workspace');
   expect(workspace).toMatchObject({

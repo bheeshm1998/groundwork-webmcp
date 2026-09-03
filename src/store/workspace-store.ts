@@ -8,6 +8,7 @@ import type {
   OperationState,
 } from '../domain/schemas';
 import type { DatasetMetadata } from '../geo-worker/api';
+import type { AnalysisProgress } from '../geo-worker/api';
 import { DEFAULT_CITY_ID, type CityId } from '../domain/cities';
 
 export interface WorkspaceStore {
@@ -24,6 +25,8 @@ export interface WorkspaceStore {
   initialized: boolean;
   drawingReady: boolean;
   activeAgentAction: string | null;
+  calculationLabel: string | null;
+  calculationProgress: AnalysisProgress | null;
   workspaceEpoch: number;
   setOperation: (operation: OperationState, error?: string | null) => void;
   commit: (next: Partial<Omit<WorkspaceStore, 'setOperation' | 'commit'>>) => void;
@@ -43,8 +46,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   initialized: false,
   drawingReady: false,
   activeAgentAction: null,
+  calculationLabel: null,
+  calculationProgress: null,
   workspaceEpoch: 0,
-  setOperation: (operation, error = null) => set({ operation, error }),
+  setOperation: (operation, error = null) =>
+    set({ operation, error, calculationLabel: null, calculationProgress: null }),
   commit: (next) => set(next),
 }));
 

@@ -24,6 +24,8 @@ import {
 import { useWorkspaceStore, workspaceSnapshot } from '../store/workspace-store';
 import { cancelPreferenceDraw } from '../map/drawing';
 import { searchOnlineLocations } from './geocoder';
+import { proxy } from 'comlink';
+import type { AnalysisProgress } from '../geo-worker/api';
 
 function id(prefix: string): string {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
@@ -39,6 +41,8 @@ function withActivity(entries: ActivityEntry[], entry: ActivityEntry): ActivityE
 
 function commandMessage(command: WorkspaceCommand): string {
   switch (command.type) {
+    case 'configure-plan':
+      return 'Built the plan and found its strongest matching areas.';
     case 'add-destination':
       return `Added ${command.destination.label} as a destination.`;
     case 'update-destination':
@@ -73,6 +77,25 @@ function commandMessage(command: WorkspaceCommand): string {
       return 'Reset the workspace.';
     case 'set-view':
       return '';
+  }
+}
+
+function calculationLabel(command: WorkspaceCommand): string {
+  switch (command.type) {
+    case 'configure-plan':
+      return 'Building the complete plan';
+    case 'add-travel':
+    case 'update-destination':
+      return 'Calculating the travel-time layer';
+    case 'add-place':
+      return 'Calculating nearby-place access';
+    case 'combine':
+    case 'recalculate':
+      return 'Intersecting priorities and ranking areas';
+    case 'add-preference':
+      return 'Applying your drawn boundary';
+    default:
+      return 'Updating the shared plan';
   }
 }
 
@@ -149,19 +172,45 @@ function localSearchScore(label: string, query: string, cityId: CityId): number 
   const normalizedLabel = normalizedSearchText(label);
   const normalizedQuery = normalizedSearchText(query);
   if (normalizedLabel === normalizedQuery) return 1_000;
-  if (normalizedLabel.startsWith(normalizedQuery)) return 900;
-  if (normalizedLabel.includes(normalizedQuery)) return 800;
+  if (normalizedLabel.startsWith(normalizedQuery)) return 940;
+  if (` ${normalizedLabel} `.includes(` ${normalizedQuery} `)) return 900;
 
-  const labelTokens = normalizedLabel.split(' ');
+  const labelTokens = normalizedLabel.split(' ').filter(Boolean);
   const queryTokens = searchTokens(query, cityId);
-  const matched = queryTokens.filter((queryToken) =>
-    labelTokens.some(
-      (labelToken) => labelToken === queryToken || labelToken.startsWith(queryToken),
-    ),
-  ).length;
-  if (matched === queryTokens.length) return 700 + matched;
+  if (labelTokens.length === 0 || queryTokens.length === 0) return 0;
+  const editDistance = (left: string, right: string) => {
+    const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+    for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+      const current = [leftIndex];
+      for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+        current[rightIndex] = Math.min(
+          current[rightIndex - 1]! + 1,
+          previous[rightIndex]! + 1,
+          previous[rightIndex - 1]! + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+        );
+      }
+      previous.splice(0, previous.length, ...current);
+    }
+    return previous[right.length]!;
+  };
+  const tokenScore = (queryToken: string, labelToken: string) => {
+    if (!queryToken || !labelToken) return 0;
+    if (labelToken === queryToken) return 1;
+    if (queryToken.length >= 2 && labelToken.startsWith(queryToken)) return 0.9;
+    if (labelToken.length >= 3 && queryToken.startsWith(labelToken)) return 0.88;
+    const longest = Math.max(queryToken.length, labelToken.length);
+    if (longest < 4) return 0;
+    const similarity = 1 - editDistance(queryToken, labelToken) / longest;
+    return similarity >= 0.72 ? similarity : 0;
+  };
+  const scores = queryTokens.map((queryToken) =>
+    Math.max(0, ...labelTokens.map((labelToken) => tokenScore(queryToken, labelToken))),
+  );
+  const matched = scores.filter((score) => score > 0).length;
+  const similarity = scores.reduce((sum, score) => sum + score, 0) / queryTokens.length;
+  if (matched === queryTokens.length && similarity >= 0.78) return 780 + similarity * 80;
   const coverage = matched / queryTokens.length;
-  return coverage >= 0.66 ? 400 + coverage * 100 : 0;
+  return coverage >= 0.66 && similarity >= 0.6 ? 500 + similarity * 100 : 0;
 }
 
 function uniqueLocations(results: LocationResult[]): LocationResult[] {
@@ -173,6 +222,15 @@ function uniqueLocations(results: LocationResult[]): LocationResult[] {
     if (unique.size === 8) break;
   }
   return [...unique.values()];
+}
+
+function progressReporter() {
+  return proxy((progress: AnalysisProgress) => {
+    const state = useWorkspaceStore.getState();
+    if (state.operation === 'calculating') {
+      state.commit({ calculationLabel: progress.label, calculationProgress: progress });
+    }
+  });
 }
 
 export class WorkspaceService {
@@ -199,7 +257,11 @@ export class WorkspaceService {
 
   private async initializeOnce(requestedCityId: CityId): Promise<CommandResult> {
     const store = useWorkspaceStore.getState();
-    store.setOperation('calculating');
+    store.commit({
+      operation: 'calculating',
+      calculationLabel: 'Loading local map intelligence',
+      calculationProgress: null,
+    });
     try {
       let restored = null;
       try {
@@ -212,7 +274,9 @@ export class WorkspaceService {
             error instanceof Error ? error.message : 'The saved workspace could not be opened.',
         });
       }
-      if (restored?.cityId === undefined) restored = { ...restored, cityId: DEFAULT_CITY_ID };
+      if (restored && restored.cityId === undefined) {
+        restored = { ...restored, cityId: DEFAULT_CITY_ID };
+      }
       if (restored && !window.location.hash && restored.cityId !== requestedCityId) restored = null;
       const cityId = restored?.cityId ?? requestedCityId;
       const initialized = await getGeoWorker().initialize(cityId);
@@ -234,7 +298,7 @@ export class WorkspaceService {
       }
       const canonical = restored?.canonical ?? emptyCanonical(cityId);
       const derived = canonical.conditions.length
-        ? await getGeoWorker().analyze(canonical)
+        ? await getGeoWorker().analyze(canonical, progressReporter())
         : structuredClone(EMPTY_DERIVED);
       store.commit({
         cityId,
@@ -247,11 +311,18 @@ export class WorkspaceService {
         operation: 'idle',
         analysisFreshness: canonical.combined ? 'fresh' : 'not-combined',
         initialized: true,
+        calculationLabel: null,
+        calculationProgress: null,
       });
       return { ok: true, message: `SweetSpot is ready for ${CITIES[cityId].name}.` };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'SweetSpot could not initialize.';
-      store.setOperation('error', message);
+      store.commit({
+        operation: 'error',
+        error: message,
+        calculationLabel: null,
+        calculationProgress: null,
+      });
       return { ok: false, message };
     }
   }
@@ -283,12 +354,16 @@ export class WorkspaceService {
     }
     if (command.type === 'undo') {
       if (!state.undo) return { ok: false, message: 'There is no recent change to undo.' };
-      state.setOperation('calculating');
+      state.commit({
+        operation: 'calculating',
+        calculationLabel: 'Restoring the previous plan',
+        calculationProgress: null,
+      });
       try {
         throwIfAborted(signal);
         const restored = CanonicalWorkspaceSchema.parse(state.undo);
         const derived = restored.conditions.length
-          ? await getGeoWorker().analyze(restored)
+          ? await getGeoWorker().analyze(restored, progressReporter())
           : structuredClone(EMPTY_DERIVED);
         throwIfAborted(signal);
         state.commit({
@@ -297,6 +372,8 @@ export class WorkspaceService {
           undo: null,
           activity: withActivity(state.activity, activity(commandMessage(command), command.actor)),
           operation: 'idle',
+          calculationLabel: null,
+          calculationProgress: null,
           analysisFreshness: restored.combined ? 'fresh' : 'not-combined',
         });
         const warning = persist();
@@ -304,11 +381,16 @@ export class WorkspaceService {
         return { ok: true, message: warning ?? 'The last change was undone.' };
       } catch (error) {
         if (isAbort(error)) {
-          state.setOperation('idle');
+          state.commit({ operation: 'idle', calculationLabel: null, calculationProgress: null });
           return { ok: false, message: 'The operation was cancelled.' };
         }
         const message = userMessage(error, 'Undo failed.');
-        state.setOperation('error', message);
+        state.commit({
+          operation: 'error',
+          error: message,
+          calculationLabel: null,
+          calculationProgress: null,
+        });
         return { ok: false, message };
       }
     }
@@ -328,6 +410,8 @@ export class WorkspaceService {
         analysisFreshness: 'not-combined',
         error: null,
         activeAgentAction: null,
+        calculationLabel: null,
+        calculationProgress: null,
         workspaceEpoch: state.workspaceEpoch + 1,
       });
       if (window.location.hash)
@@ -335,15 +419,105 @@ export class WorkspaceService {
       return { ok: true, message: 'Workspace reset.' };
     }
 
-    state.setOperation('calculating');
+    state.commit({
+      operation: 'calculating',
+      calculationLabel: calculationLabel(command),
+      calculationProgress: null,
+    });
     const before = cloneCanonical(state.canonical);
     let canonical = cloneCanonical(state.canonical);
     let needsAnalysis = true;
     let freshness = state.analysisFreshness;
+    let createdDestination: CanonicalWorkspace['destinations'][number] | null = null;
+    let createdCondition: CanonicalWorkspace['conditions'][number] | null = null;
 
     try {
       throwIfAborted(signal);
       switch (command.type) {
+        case 'configure-plan': {
+          if (command.destinations.length > 4) {
+            throw new Error('A workspace can contain up to four destinations.');
+          }
+          if (command.conditions.length > 20) {
+            throw new Error('A workspace can contain up to twenty priorities.');
+          }
+          const destinationKeys = new Set<string>();
+          const destinationIds = new Map<string, string>();
+          const nextDestinations = command.replaceExisting === false ? canonical.destinations : [];
+          for (const destination of command.destinations) {
+            if (destinationKeys.has(destination.key)) {
+              throw new Error(`Destination key "${destination.key}" is duplicated.`);
+            }
+            destinationKeys.add(destination.key);
+            if (!coordinateIsInCity(state.cityId, destination.coordinates)) {
+              throw new Error(`Choose locations inside ${CITIES[state.cityId].name}.`);
+            }
+            if (!(await getGeoWorker().isCoordinateSupported(destination.coordinates))) {
+              throw new Error(
+                `${destination.label} is outside the supported ${CITIES[state.cityId].name} map boundary.`,
+              );
+            }
+            throwIfAborted(signal);
+            const destinationId = id('destination');
+            destinationIds.set(destination.key, destinationId);
+            nextDestinations.push({
+              id: destinationId,
+              label: destination.label,
+              coordinates: destination.coordinates,
+            });
+          }
+          if (nextDestinations.length > 4) {
+            throw new Error('A workspace can contain up to four destinations.');
+          }
+          const nextConditions = command.replaceExisting === false ? canonical.conditions : [];
+          for (const input of command.conditions) {
+            if (input.kind === 'travel') {
+              const destinationId = destinationIds.get(input.destinationKey);
+              const destination = nextDestinations.find(({ id }) => id === destinationId);
+              if (!destination) {
+                throw new Error(
+                  `Travel priority references unknown destination key "${input.destinationKey}".`,
+                );
+              }
+              nextConditions.push({
+                id: id('travel'),
+                kind: 'travel',
+                destinationId: destination.id,
+                mode: input.mode,
+                maxMinutes: input.maxMinutes,
+                label: travelConditionLabel(input.maxMinutes, input.mode, destination.label),
+                visible: true,
+              });
+            } else {
+              nextConditions.push({
+                id: id(input.category),
+                kind: 'access',
+                category: input.category,
+                mode: input.mode,
+                maxMinutes: input.maxMinutes,
+                groceryType: input.groceryType,
+                label: placeConditionLabel(
+                  input.maxMinutes,
+                  input.mode,
+                  input.category,
+                  input.groceryType,
+                ),
+                visible: true,
+              });
+            }
+          }
+          if (nextConditions.length > 20) {
+            throw new Error('A workspace can contain up to twenty priorities.');
+          }
+          canonical.destinations = nextDestinations;
+          canonical.conditions = nextConditions;
+          canonical.selectedCandidateId = null;
+          canonical.removedCandidateIds = [];
+          canonical.combined = (command.findMatches ?? true) && nextConditions.length >= 2;
+          freshness = canonical.combined ? 'fresh' : 'not-combined';
+          needsAnalysis = nextConditions.length > 0;
+          break;
+        }
         case 'add-destination': {
           if (canonical.destinations.length >= 4) {
             throw new Error('A workspace can contain up to four destinations.');
@@ -359,10 +533,11 @@ export class WorkspaceService {
             );
           }
           throwIfAborted(signal);
-          canonical.destinations.push({
+          createdDestination = {
             ...command.destination,
             id: command.destination.id ?? id('destination'),
-          });
+          };
+          canonical.destinations.push(createdDestination);
           canonical.selectedCandidateId = null;
           needsAnalysis = false;
           break;
@@ -418,7 +593,7 @@ export class WorkspaceService {
           const destination = canonical.destinations.find(({ id }) => id === command.destinationId);
           if (!destination)
             throw new Error('Choose a current destination for this travel priority.');
-          canonical.conditions.push({
+          createdCondition = {
             id: id('travel'),
             kind: 'travel',
             destinationId: command.destinationId,
@@ -426,11 +601,12 @@ export class WorkspaceService {
             label: travelConditionLabel(command.maxMinutes, command.mode, destination.label),
             visible: true,
             maxMinutes: command.maxMinutes,
-          });
+          };
+          canonical.conditions.push(createdCondition);
           break;
         }
         case 'add-place':
-          canonical.conditions.push({
+          createdCondition = {
             id: id(command.category),
             kind: 'access',
             category: command.category,
@@ -444,17 +620,19 @@ export class WorkspaceService {
             visible: true,
             maxMinutes: command.maxMinutes,
             groceryType: command.groceryType,
-          });
+          };
+          canonical.conditions.push(createdCondition);
           break;
         case 'add-preference':
           canonical.conditions = canonical.conditions.filter(({ kind }) => kind !== 'preference');
-          canonical.conditions.push({
+          createdCondition = {
             id: id('preference'),
             kind: 'preference',
             label: 'Personal preference area',
             visible: true,
             geometry: command.geometry,
-          });
+          };
+          canonical.conditions.push(createdCondition);
           break;
         case 'update-condition': {
           const target = canonical.conditions.find(
@@ -539,6 +717,7 @@ export class WorkspaceService {
         case 'rank':
           if (!canonical.combined || freshness !== 'fresh')
             throw new Error('Create a fresh feasible region before ranking candidates.');
+          needsAnalysis = false;
           break;
         case 'select-candidate':
           if (
@@ -563,7 +742,7 @@ export class WorkspaceService {
 
       canonical = CanonicalWorkspaceSchema.parse(canonical);
       const derived = needsAnalysis
-        ? await getGeoWorker().analyze(canonical)
+        ? await getGeoWorker().analyze(canonical, progressReporter())
         : structuredClone(state.derived);
       throwIfAborted(signal);
       if (
@@ -587,6 +766,8 @@ export class WorkspaceService {
         undo: isMeaningfulChange(command) ? before : state.undo,
         activity: withActivity(state.activity, activity(commandMessage(command), command.actor)),
         operation: 'idle',
+        calculationLabel: null,
+        calculationProgress: null,
         analysisFreshness: freshness,
         error: null,
       });
@@ -597,22 +778,29 @@ export class WorkspaceService {
         message: warning ?? commandMessage(command),
         data: {
           feasibleAreaKm2: derived.feasibleAreaKm2,
-          candidateIds: derived.candidates.map(({ id }) => id),
+          candidates: derived.candidates,
+          createdDestination,
+          createdCondition,
           freshness,
         },
       };
     } catch (error) {
       if (isAbort(error)) {
-        state.setOperation('idle');
+        state.commit({ operation: 'idle', calculationLabel: null, calculationProgress: null });
         return { ok: false, message: 'The operation was cancelled.' };
       }
       const message = userMessage(error, 'The workspace change failed.');
-      state.setOperation('error', message);
+      state.commit({
+        operation: 'error',
+        error: message,
+        calculationLabel: null,
+        calculationProgress: null,
+      });
       return { ok: false, message };
     }
   }
 
-  async query(query: WorkspaceQuery): Promise<CommandResult> {
+  async query(query: WorkspaceQuery, signal?: AbortSignal): Promise<CommandResult> {
     const state = workspaceSnapshot();
     switch (query.type) {
       case 'get-workspace':
@@ -621,6 +809,8 @@ export class WorkspaceService {
           message: 'Workspace summary.',
           data: {
             city: CITIES[state.cityId].name,
+            ready: state.initialized,
+            operation: state.operation,
             destinations: state.canonical.destinations,
             conditions: state.canonical.conditions.map((condition) =>
               condition.kind === 'preference'
@@ -652,7 +842,7 @@ export class WorkspaceService {
           },
         };
       case 'search-locations': {
-        const matches = await this.searchLocations(query.query);
+        const matches = await this.searchLocations(query.query, signal);
         return {
           ok: true,
           message:
@@ -705,7 +895,7 @@ export class WorkspaceService {
     }
   }
 
-  private async searchLocations(query: string): Promise<LocationResult[]> {
+  private async searchLocations(query: string, signal?: AbortSignal): Promise<LocationResult[]> {
     const normalized = normalizedSearchText(query);
     if (normalized.length < 2) return [];
     const cityId = workspaceSnapshot().cityId;
@@ -718,10 +908,12 @@ export class WorkspaceService {
           a.match.label.localeCompare(b.match.label) ||
           a.match.id.localeCompare(b.match.id),
       );
-    const hasStrongLocalMatch = local.some(({ score }) => score >= 700);
+    const topLocalScore = local[0]?.score ?? 0;
+    const localMatches = local.filter(({ score }) => score >= Math.max(500, topLocalScore - 140));
+    const hasStrongLocalMatch = localMatches.some(({ score }) => score >= 760);
     const shouldSearchOnline = !hasStrongLocalMatch || /\d/u.test(normalized);
-    const online = shouldSearchOnline ? await searchOnlineLocations(cityId, query) : [];
-    return uniqueLocations([...online, ...local.map(({ match }) => match)]);
+    const online = shouldSearchOnline ? await searchOnlineLocations(cityId, query, signal) : [];
+    return uniqueLocations([...localMatches.map(({ match }) => match), ...online]);
   }
 }
 

@@ -6,6 +6,16 @@ The map and the control panels are two views of the same state. Destinations and
 
 SweetSpot is a planning aid, not a routing guarantee or housing-listing service. It does not model live traffic, elevation, temporary closures, opening hours, accessibility, or housing availability.
 
+## Judge quick start
+
+1. Open `/app?city=sf` in a WebMCP-capable browser.
+2. Ask the browser assistant: “Help me find a genuinely focused area in San Francisco: within an 8-minute bike ride of San Francisco City Hall, a 5-minute walk of a supermarket, and a 4-minute walk of parks. Build the complete plan, show three geographically distinct options, and explain each trade-off.”
+3. Watch the live agent ticker and per-layer progress while the map remains interactive.
+4. Ask the assistant to request a personal boundary. Draw directly on the map and double-click to hand control back.
+5. Open **Workspace** to see which changes came from the agent and which came from you, then undo or share the plan.
+
+This path demonstrates the core WebMCP idea: the assistant is not narrating a remote API response. It is operating the same visible, reversible workspace as the person, and can deliberately pause for human spatial judgment.
+
 ## Data and calculations
 
 The committed dataset contains fetched public records only:
@@ -18,7 +28,7 @@ Both cities use the `sweetspot-graph-v3` binary format. Every directed edge stor
 
 Each city has an independent manifest: [`public/data/sf/metadata.json`](public/data/sf/metadata.json) and [`public/data/hyderabad/metadata.json`](public/data/hyderabad/metadata.json). They record source URLs, extract dates, SHA-256 checksums, versioned asset filenames, per-category counts, and graph sizes. The build stops if a source cannot be fetched, an extract is unexpectedly small, a required category is empty, or the city-specific graph budget is exceeded. There is no synthetic fallback.
 
-Destination search uses the bundled city index first. Names or addresses absent from the extract fall back to a city-bounded Photon-compatible OpenStreetMap geocoder. Set `VITE_GEOCODER_URL` to a supported or self-hosted Photon endpoint for production traffic.
+Destination search uses typo-tolerant token and word-boundary matching against the bundled city index first. Names or addresses absent from the extract fall back to a city-bounded Photon-compatible OpenStreetMap geocoder. The manual search is debounced and cancels stale requests. Set `VITE_GEOCODER_URL` to a supported or self-hosted Photon endpoint for production traffic.
 
 ## Rebuild the datasets
 
@@ -48,11 +58,15 @@ npm run test:e2e
 
 SweetSpot initializes `@mcp-b/webmcp-polyfill` before React mounts. The polyfill supplies `document.modelContext` only when the browser does not provide the native API, so a compatible MCP-B extension, relay, or native browser assistant can discover the page's tools.
 
-The 19 capability-gated tools are:
+The 18 capability-gated tools are:
 
-`get_workspace`, `search_locations`, `add_destination`, `remove_destination`, `add_travel_condition`, `add_place_condition`, `request_user_drawing`, `update_condition`, `delete_condition`, `set_layer_visibility`, `combine_conditions`, `recalculate`, `rank_areas`, `analyze_restriction`, `select_area`, `explain_area`, `remove_area`, `undo`, and `create_share_link`.
+`get_workspace`, `search_locations`, `configure_plan`, `add_destination`, `remove_destination`, `add_travel_condition`, `add_place_condition`, `request_user_drawing`, `update_condition`, `delete_condition`, `set_layer_visibility`, `find_matching_areas`, `recalculate`, `analyze_restriction`, `select_area`, `explain_area`, `remove_area`, `undo`, and `create_share_link`.
 
-Availability follows the live workspace. For example, combining is unavailable until at least two conditions exist, ranking is unavailable before a feasible region exists, and `request_user_drawing` remains in flight until the person finishes or cancels the drawing.
+`configure_plan` is the fast path: after resolving destinations with `search_locations`, an assistant can create a complete plan and receive the ranked candidates in one atomic calculation. The granular tools remain available for conversational edits. Created destinations and conditions return their IDs directly, and `find_matching_areas` both intersects and ranks in one call.
+
+Availability follows the live workspace. For example, matching is unavailable until at least two conditions exist, candidate actions appear only after results exist, and `request_user_drawing` remains in flight until the person finishes or cancels the drawing. `get_workspace` registers during data startup so the assistant can report readiness instead of appearing absent.
+
+Repeated edits reuse bounded maximum-cutoff distance fields, and place-to-road snapping uses H3 spatial buckets rather than scanning the full road graph for every place. Destination snaps that reach implausibly few road nodes fail with an actionable warning instead of producing a misleading tiny result.
 
 For a Chrome origin-trial release, obtain a token for the exact final HTTPS origin and set:
 

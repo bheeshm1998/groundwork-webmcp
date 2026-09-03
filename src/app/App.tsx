@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ActivityPanel } from './ActivityPanel';
 import { ConditionsPanel } from './ConditionsPanel';
 import { HomePage } from './HomePage';
@@ -29,6 +29,8 @@ function WorkspaceApp() {
   const undo = useWorkspaceStore((state) => state.undo);
   const drawingReady = useWorkspaceStore((state) => state.drawingReady);
   const activeAgentAction = useWorkspaceStore((state) => state.activeAgentAction);
+  const calculationLabel = useWorkspaceStore((state) => state.calculationLabel);
+  const calculationProgress = useWorkspaceStore((state) => state.calculationProgress);
   const latestActivity = useWorkspaceStore((state) => state.activity.at(-1));
   const conditionCount = canonical.conditions.length;
   const destinationCount = canonical.destinations.length;
@@ -178,7 +180,9 @@ function WorkspaceApp() {
         </div>
       </header>
       <section className="workspace-pulse" aria-label="Live workspace activity">
-        <span className="capability-count">{capabilities.size} agent actions available</span>
+        <span className="capability-count">
+          Live agent workspace · {capabilities.size} actions ready
+        </span>
         {activeAgentAction ? (
           <span className="live-agent-action" role="status">
             <i aria-hidden="true" /> Agent · {activeAgentAction}
@@ -198,6 +202,26 @@ function WorkspaceApp() {
       </section>
       <div ref={workspaceGridRef} className={`workspace-grid ${hasResults ? 'has-results' : ''}`}>
         <aside className="planner-sidebar" aria-label="Plan setup">
+          <section className="agent-command-center" aria-labelledby="agent-center-heading">
+            <div className="agent-orbit" aria-hidden="true">
+              <span />
+            </div>
+            <div className="agent-command-copy">
+              <p className="section-kicker">Human + agent, one live map</p>
+              <h2 id="agent-center-heading">Plan with ChatGPT</h2>
+              <p>
+                Ask your browser assistant to build the whole plan, or take over any step yourself.
+                Every change stays visible and reversible.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="agent-activity-button"
+              onClick={() => setShowActivity(true)}
+            >
+              {activeAgentAction ? `Agent · ${activeAgentAction}` : 'View shared activity'}
+            </button>
+          </section>
           <OnboardingPanel />
           <ConditionsPanel />
         </aside>
@@ -222,7 +246,24 @@ function WorkspaceApp() {
           )}
           {operation === 'calculating' ? (
             <div className="calculation-pill" role="status">
-              Calculating on this device…
+              <span className="progress-spinner" aria-hidden="true" />
+              <span>
+                <strong>{calculationLabel ?? 'Calculating locally'}</strong>
+                {calculationProgress && calculationProgress.total > 0
+                  ? `${Math.min(calculationProgress.completed + 1, calculationProgress.total)} of ${calculationProgress.total} steps · map stays interactive`
+                  : 'Your map stays interactive while this runs on-device.'}
+              </span>
+              {calculationProgress && calculationProgress.total > 0 ? (
+                <i
+                  className="calculation-progress-track"
+                  aria-hidden="true"
+                  style={
+                    {
+                      '--progress': `${Math.min(100, (calculationProgress.completed / calculationProgress.total) * 100)}%`,
+                    } as CSSProperties
+                  }
+                />
+              ) : null}
             </div>
           ) : null}
           {operation === 'drawing' ? (
@@ -275,12 +316,6 @@ function WorkspaceApp() {
             </div>
             <ActivityPanel />
           </aside>
-        </div>
-      ) : null}
-      {!initialized && operation !== 'error' ? (
-        <div className="boot-screen">
-          <span className="brand-mark">S</span>
-          <p>Preparing your map…</p>
         </div>
       ) : null}
       {error && initialized ? (

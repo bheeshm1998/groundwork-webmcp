@@ -101,6 +101,7 @@ function resetStore(canonical: CanonicalWorkspace = structuredClone(EMPTY_CANONI
     initialized: false,
     drawingReady: false,
     activeAgentAction: null,
+    calculationLabel: null,
   });
 }
 
@@ -117,6 +118,18 @@ describe('WorkspaceService', () => {
           label: SF_DESTINATION.label,
           coordinates: SF_DESTINATION.coordinates,
           kind: 'poi',
+        },
+        {
+          id: 'non-latin-1',
+          label: '三藩市以琳教會',
+          coordinates: [-122.462, 37.766] as [number, number],
+          kind: 'poi' as const,
+        },
+        {
+          id: 'short-token-1',
+          label: 'C& H Complete Auto Repair',
+          coordinates: [-122.419, 37.764] as [number, number],
+          kind: 'poi' as const,
         },
       ],
     });
@@ -198,10 +211,76 @@ describe('WorkspaceService', () => {
       query: 'Google San Francisco',
     });
 
-    expect(geocoder.searchOnlineLocations).toHaveBeenCalledWith('sf', 'Google San Francisco');
+    expect(geocoder.searchOnlineLocations).toHaveBeenCalledWith(
+      'sf',
+      'Google San Francisco',
+      undefined,
+    );
     expect(result.data).toEqual([
       expect.objectContaining({ label: 'Google — 345 Spear Street, San Francisco, California' }),
     ]);
+  });
+
+  it('matches minor local typos without waiting for online geocoding', async () => {
+    await workspaceService.initialize();
+
+    const result = await workspaceService.query({
+      type: 'search-locations',
+      query: 'San Fransisco Cty Hall',
+    });
+
+    expect(result.data).toEqual([expect.objectContaining({ label: SF_DESTINATION.label })]);
+    expect(geocoder.searchOnlineLocations).not.toHaveBeenCalled();
+  });
+
+  it('configures and analyzes a complete agent plan in one command', async () => {
+    await workspaceService.initialize();
+    const result = await workspaceService.execute({
+      type: 'configure-plan',
+      actor: 'agent',
+      destinations: [
+        {
+          key: 'office',
+          label: SF_DESTINATION.label,
+          coordinates: SF_DESTINATION.coordinates,
+        },
+      ],
+      conditions: [
+        { kind: 'travel', destinationKey: 'office', mode: 'car', maxMinutes: 18 },
+        { kind: 'access', category: 'grocery', mode: 'walk', maxMinutes: 8 },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: { feasibleAreaKm2: 0.48, candidates: [{ id: 'candidate-1' }], freshness: 'fresh' },
+    });
+    expect(worker.analyze).toHaveBeenCalledTimes(1);
+    expect(useWorkspaceStore.getState().canonical.destinations).toEqual([
+      expect.objectContaining({ label: SF_DESTINATION.label }),
+    ]);
+    expect(useWorkspaceStore.getState().canonical.conditions).toHaveLength(2);
+  });
+
+  it('returns created IDs directly from granular commands', async () => {
+    await workspaceService.initialize();
+    const destination = await workspaceService.execute({
+      type: 'add-destination',
+      destination: { label: SF_DESTINATION.label, coordinates: SF_DESTINATION.coordinates },
+    });
+    const createdDestination = (destination.data as { createdDestination: { id: string } | null })
+      .createdDestination;
+    expect(createdDestination?.id).toMatch(/^destination-/u);
+
+    const condition = await workspaceService.execute({
+      type: 'add-travel',
+      destinationId: createdDestination!.id,
+      mode: 'car',
+      maxMinutes: 18,
+    });
+    expect(
+      (condition.data as { createdCondition: { id: string } | null }).createdCondition?.id,
+    ).toMatch(/^travel-/u);
   });
 
   it('loads Hyderabad independently and rejects coordinates from another city', async () => {

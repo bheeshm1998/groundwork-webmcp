@@ -72,7 +72,13 @@ export function ResultsPanel() {
               >
                 <span className="candidate-rank">{index + 1}</span>
                 <span className="candidate-title">
-                  <small>{index === 0 ? 'Best balance' : `Option ${index + 1}`}</small>
+                  <small>
+                    {index === 0
+                      ? 'Best balance'
+                      : index === 1
+                        ? 'Strong alternative'
+                        : 'Different neighborhood'}
+                  </small>
                   <strong>{candidate.name}</strong>
                 </span>
               </button>

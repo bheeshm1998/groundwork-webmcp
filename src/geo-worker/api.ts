@@ -17,8 +17,17 @@ export interface DatasetMetadata {
   };
 }
 
+export interface AnalysisProgress {
+  completed: number;
+  total: number;
+  label: string;
+}
+
 export interface GeoWorkerApi {
   initialize(cityId: CityId): Promise<{ metadata: DatasetMetadata; search: PlacesData['search'] }>;
   isCoordinateSupported(coordinate: Coordinate): Promise<boolean>;
-  analyze(canonical: CanonicalWorkspace): Promise<DerivedAnalysis>;
+  analyze(
+    canonical: CanonicalWorkspace,
+    onProgress?: (progress: AnalysisProgress) => void,
+  ): Promise<DerivedAnalysis>;
 }

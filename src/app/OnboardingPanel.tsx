@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { LocationResult } from '../domain/schemas';
 import { CITIES } from '../domain/cities';
 import { buildStarterPrompts } from '../domain/starter-prompts';
@@ -12,15 +12,18 @@ export function OnboardingPanel() {
   const [searched, setSearched] = useState(false);
   const [promptIndex, setPromptIndex] = useState(0);
   const [copyMessage, setCopyMessage] = useState('');
+  const searchController = useRef<AbortController | null>(null);
   const destinations = useWorkspaceStore((state) => state.canonical.destinations);
   const operation = useWorkspaceStore((state) => state.operation);
   const cityId = useWorkspaceStore((state) => state.cityId);
   const workspaceEpoch = useWorkspaceStore((state) => state.workspaceEpoch);
+  const initialized = useWorkspaceStore((state) => state.initialized);
   const city = CITIES[cityId];
   const prompts = useMemo(() => buildStarterPrompts(city), [city]);
   const mutationsDisabled = operation === 'calculating' || operation === 'drawing';
 
   useEffect(() => {
+    searchController.current?.abort();
     setQuery('');
     setMatches([]);
     setSearched(false);
@@ -28,18 +31,43 @@ export function OnboardingPanel() {
     setCopyMessage('');
   }, [workspaceEpoch]);
 
-  const search = async (event: FormEvent) => {
-    event.preventDefault();
-    if (query.trim().length < 2) return;
+  const runSearch = useCallback(async (value: string) => {
+    if (value.trim().length < 2) return;
+    searchController.current?.abort();
+    const controller = new AbortController();
+    searchController.current = controller;
     setSearching(true);
     setSearched(false);
     try {
-      const result = await workspaceService.query({ type: 'search-locations', query });
+      const result = await workspaceService.query(
+        { type: 'search-locations', query: value },
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
       setMatches((result.data as LocationResult[] | undefined) ?? []);
       setSearched(true);
     } finally {
-      setSearching(false);
+      if (searchController.current === controller) setSearching(false);
     }
+  }, []);
+
+  useEffect(() => {
+    if (!initialized || query.trim().length < 2) {
+      searchController.current?.abort();
+      setMatches([]);
+      setSearched(false);
+      setSearching(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => void runSearch(query), 280);
+    return () => window.clearTimeout(timeout);
+  }, [initialized, query, runSearch]);
+
+  useEffect(() => () => searchController.current?.abort(), []);
+
+  const search = (event: FormEvent) => {
+    event.preventDefault();
+    void runSearch(query);
   };
 
   const copyPrompt = async () => {
@@ -98,18 +126,25 @@ export function OnboardingPanel() {
               id="destination-search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Company, address, street, or landmark"
+              placeholder={
+                initialized ? 'Company, address, street, or landmark' : 'Preparing local search…'
+              }
+              aria-describedby="search-help"
               minLength={2}
               autoFocus={destinations.length === 0}
+              disabled={!initialized}
             />
             <button
               type="submit"
               className="primary-button compact-primary"
-              disabled={searching || query.trim().length < 2}
+              disabled={!initialized || searching || query.trim().length < 2}
             >
               {searching ? 'Searching…' : 'Search'}
             </button>
           </div>
+          <small id="search-help" className="search-help">
+            Typo-tolerant search · results update as you type
+          </small>
         </form>
       ) : null}
 
@@ -155,10 +190,17 @@ export function OnboardingPanel() {
         </p>
       ) : null}
 
-      <div className="starter-prompt-panel">
+      <details className="starter-prompt-panel" open={destinations.length === 0}>
+        <summary>
+          <span className="section-kicker">Try with ChatGPT</span>
+          <strong>
+            {destinations.length === 0
+              ? 'Plan this map with your browser assistant'
+              : 'Open agent starter prompt'}
+          </strong>
+        </summary>
         <div>
-          <p className="section-kicker">Start with this prompt</p>
-          <p>Copy one into your browser assistant and watch the shared map update.</p>
+          <p>Copy one prompt, then watch ChatGPT operate the same workspace beside you.</p>
         </div>
         <div className="prompt-variations" aria-label="Prompt variations">
           {prompts.map((_, index) => (
@@ -186,7 +228,7 @@ export function OnboardingPanel() {
           Copy prompt
         </button>
         {copyMessage ? <output className="prompt-copy-status">{copyMessage}</output> : null}
-      </div>
+      </details>
     </section>
   );
 }

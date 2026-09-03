@@ -4,7 +4,9 @@ async function addDestination(page: Page, name: string) {
   await page.getByLabel(/Search (San Francisco|Hyderabad)/u).fill(name);
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await page
-    .getByRole('button', { name: new RegExp(`${name} Place`, 'u') })
+    .getByRole('list', { name: 'Location matches' })
+    .getByRole('button')
+    .filter({ hasText: name })
     .first()
     .click();
   await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
@@ -36,12 +38,12 @@ test.describe('SweetSpot manual flow', () => {
       origin: new URL(page.url()).origin,
     });
     await expect(
-      page.getByRole('heading', { name: 'Find places that fit your preferences' }),
+      page.getByRole('heading', { name: 'Find the neighborhood where your whole life fits.' }),
     ).toBeVisible();
-    await page.getByRole('link', { name: 'Plan in San Francisco' }).click();
+    await page.getByRole('link', { name: 'Start planning in San Francisco' }).click();
     await expect(page).toHaveURL(/\/app\?city=sf$/u);
     await expect(page.getByRole('heading', { name: 'Where do you need to go?' })).toBeVisible();
-    await expect(page.getByText('Start with this prompt')).toBeVisible();
+    await expect(page.getByText('Try with ChatGPT')).toBeVisible();
 
     await addDestination(page, 'San Francisco City Hall');
     await addPriority(page, { type: 'travel', mode: 'car', minutes: 30 });
@@ -100,7 +102,7 @@ test.describe('SweetSpot manual flow', () => {
     test.setTimeout(120_000);
     await page.goto('/');
     await page.getByRole('button', { name: /Hyderabad India/u }).click();
-    await page.getByRole('link', { name: 'Plan in Hyderabad' }).click();
+    await page.getByRole('link', { name: 'Start planning in Hyderabad' }).click();
 
     await expect(page).toHaveURL(/\/app\?city=hyderabad$/u);
     await addDestination(page, 'Gachibowli');
@@ -116,7 +118,7 @@ test.describe('SweetSpot manual flow', () => {
     page,
   }) => {
     await page.goto('/app?city=sf');
-    await expect(page.getByText('Start with this prompt')).toBeVisible();
+    await expect(page.getByText('Try with ChatGPT')).toBeVisible();
     await expect(page.getByLabel('Priority type')).toBeVisible();
     const workspaceButton = page.getByRole('button', { name: 'Workspace' });
     await workspaceButton.click();
@@ -144,7 +146,11 @@ test.describe('SweetSpot manual flow', () => {
     await page.getByLabel('Search San Francisco').fill('San Francisco City Hall');
     await page.getByRole('button', { name: 'Search', exact: true }).click();
     await expect(
-      page.getByRole('button', { name: /San Francisco City Hall Place/u }),
+      page
+        .getByRole('list', { name: 'Location matches' })
+        .getByRole('button')
+        .filter({ hasText: 'San Francisco City Hall' })
+        .first(),
     ).toBeVisible();
   });
 });

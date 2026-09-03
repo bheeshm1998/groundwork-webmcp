@@ -458,12 +458,14 @@ export function ConditionsPanel() {
         </div>
       ) : null}
 
-      <details className="advanced-options">
-        <summary>Draw a preferred area</summary>
+      <div className="human-handoff-card">
+        <div className="handoff-badge">Human handoff</div>
         <div className="advanced-option-row">
           <div>
-            <strong>Personal boundary</strong>
-            <small>Draw the part of the city you would consider.</small>
+            <strong>Show the agent where you would live</strong>
+            <small>
+              ChatGPT can pause mid-plan and hand you the map. Draw a boundary, then it continues.
+            </small>
           </div>
           {!preference ? (
             <button
@@ -500,7 +502,7 @@ export function ConditionsPanel() {
             Cancel drawing
           </button>
         ) : null}
-      </details>
+      </div>
 
       {!combined ? (
         <button

@@ -62,9 +62,9 @@ const api: GeoWorkerApi = {
     if (!engine) throw new Error('The analysis engine is not initialized.');
     return engine.containsCoordinate(coordinate);
   },
-  async analyze(canonical) {
+  async analyze(canonical, onProgress) {
     if (!engine) throw new Error('The analysis engine is not initialized.');
-    return engine.analyze(canonical);
+    return engine.analyze(canonical, onProgress);
   },
 };
 

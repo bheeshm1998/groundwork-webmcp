@@ -25,11 +25,14 @@ import type {
   PlaceCategory,
   TravelMode,
 } from '../domain/schemas';
+import type { AnalysisProgress } from './api';
 import {
   dijkstra,
+  coordinateDistanceKm,
   multiSourceDijkstra,
   nearestNode,
-  nearestNodeForMode,
+  nearestNodeForModeWithDistance,
+  reachableNodeCount,
   reverseGraph,
   weightsForMode,
   type GraphData,
@@ -151,6 +154,8 @@ export class GeoEngine {
     string,
     { layer: AreaGeometry | null; travel?: TravelContext; access?: AccessContext }
   >();
+  private readonly travelFieldCache = new Map<string, TravelContext>();
+  private readonly accessFieldCache = new Map<string, AccessContext>();
 
   constructor(
     graph: GraphData,
@@ -225,6 +230,55 @@ export class GeoEngine {
     return closest;
   }
 
+  private nearestNetworkNode(
+    coordinate: Coordinate,
+    mode: TravelMode,
+  ): { node: number; distanceKm: number } {
+    const origin = latLngToCell(coordinate[1], coordinate[0], 10);
+    const visited = new Set<string>();
+    const weights = weightsForMode(this.reverseTravelGraph, mode);
+    let closest = -1;
+    let closestDistanceKm = Number.POSITIVE_INFINITY;
+    let firstMatchRadius = -1;
+    for (let radius = 0; radius <= 8; radius += 1) {
+      let cells: string[];
+      try {
+        cells = gridDisk(origin, radius);
+      } catch {
+        break;
+      }
+      for (const cell of cells) {
+        if (visited.has(cell)) continue;
+        visited.add(cell);
+        for (const index of this.nodeBuckets.get(cell) ?? []) {
+          let eligible = false;
+          for (
+            let edge = this.reverseTravelGraph.offsets[index]!;
+            edge < this.reverseTravelGraph.offsets[index + 1]!;
+            edge += 1
+          ) {
+            if (Number.isFinite(weights[edge]!)) {
+              eligible = true;
+              break;
+            }
+          }
+          if (!eligible) continue;
+          const candidate: Coordinate = [this.graph.lng[index]!, this.graph.lat[index]!];
+          const candidateDistanceKm = coordinateDistanceKm(coordinate, candidate);
+          if (candidateDistanceKm < closestDistanceKm) {
+            closest = index;
+            closestDistanceKm = candidateDistanceKm;
+          }
+        }
+      }
+      if (closest >= 0) {
+        if (firstMatchRadius < 0) firstMatchRadius = radius;
+        else if (radius > firstMatchRadius) return { node: closest, distanceKm: closestDistanceKm };
+      }
+    }
+    return nearestNodeForModeWithDistance(this.reverseTravelGraph, coordinate, mode);
+  }
+
   private computeConditionLayer(
     canonical: CanonicalWorkspace,
     condition: Condition,
@@ -241,24 +295,32 @@ export class GeoEngine {
                 condition.groceryType === 'supermarket_or_grocery' || place.type === 'supermarket',
             )
           : categoryPlaces;
-      const originPlaces: PlaceRecord[] = [];
-      const origins = places.flatMap((place) =>
-        (place.accessPoints?.length ? place.accessPoints : [place.coordinates]).map(
-          (coordinate) => {
-            originPlaces.push(place);
-            return nearestNodeForMode(this.reverseTravelGraph, coordinate, condition.mode);
-          },
-        ),
-      );
-      const access = {
-        ...multiSourceDijkstra(
-          this.reverseTravelGraph,
-          origins,
-          condition.maxMinutes,
-          condition.mode,
-        ),
-        places: originPlaces,
-      };
+      const fieldKey = JSON.stringify({
+        category: condition.category,
+        mode: condition.mode,
+        groceryType: condition.groceryType,
+      });
+      let access = this.accessFieldCache.get(fieldKey);
+      if (!access) {
+        const originPlaces: PlaceRecord[] = [];
+        const origins = places.flatMap((place) =>
+          (place.accessPoints?.length ? place.accessPoints : [place.coordinates]).map(
+            (coordinate) => {
+              originPlaces.push(place);
+              return this.nearestNetworkNode(coordinate, condition.mode).node;
+            },
+          ),
+        );
+        access = {
+          ...multiSourceDijkstra(this.reverseTravelGraph, origins, 45, condition.mode),
+          places: originPlaces,
+        };
+        this.accessFieldCache.set(fieldKey, access);
+        if (this.accessFieldCache.size > 12) {
+          const oldest = this.accessFieldCache.keys().next().value;
+          if (oldest) this.accessFieldCache.delete(oldest);
+        }
+      }
       return {
         layer: makeNetworkArea(
           this.reverseTravelGraph,
@@ -272,26 +334,43 @@ export class GeoEngine {
     }
     const destination = canonical.destinations.find(({ id }) => id === condition.destinationId);
     if (!destination) return { layer: null };
-    const origin = nearestNodeForMode(
-      this.reverseTravelGraph,
-      destination.coordinates,
-      condition.mode,
-    );
-    const distances = dijkstra(
-      this.reverseTravelGraph,
-      origin,
-      condition.maxMinutes,
-      condition.mode,
-    );
+    const snap = this.nearestNetworkNode(destination.coordinates, condition.mode);
+    if (snap.distanceKm > 0.75) {
+      throw new Error(
+        `${destination.label} is too far from a ${condition.mode}-accessible road. Choose a nearby entrance or street.`,
+      );
+    }
+    const fieldKey = JSON.stringify({
+      mode: condition.mode,
+      coordinates: destination.coordinates.map((value) => Number(value.toFixed(6))),
+    });
+    let travel = this.travelFieldCache.get(fieldKey);
+    if (!travel) {
+      travel = {
+        distances: dijkstra(this.reverseTravelGraph, snap.node, 90, condition.mode),
+      };
+      const reachable = reachableNodeCount(travel.distances);
+      const minimumReachable = condition.mode === 'car' ? 50 : 20;
+      if (reachable < minimumReachable) {
+        throw new Error(
+          `${destination.label} snapped to a disconnected road (${reachable} reachable nodes). Choose the main entrance or a nearby through street.`,
+        );
+      }
+      this.travelFieldCache.set(fieldKey, travel);
+      if (this.travelFieldCache.size > 12) {
+        const oldest = this.travelFieldCache.keys().next().value;
+        if (oldest) this.travelFieldCache.delete(oldest);
+      }
+    }
     return {
       layer: makeNetworkArea(
         this.reverseTravelGraph,
-        distances,
+        travel.distances,
         condition.maxMinutes,
         condition.mode,
         this.boundary,
       ),
-      travel: { distances },
+      travel,
     };
   }
 
@@ -317,11 +396,20 @@ export class GeoEngine {
     return computed;
   }
 
-  analyze(canonical: CanonicalWorkspace): DerivedAnalysis {
+  analyze(
+    canonical: CanonicalWorkspace,
+    onProgress?: (progress: AnalysisProgress) => void,
+  ): DerivedAnalysis {
     const layers: Record<string, AreaGeometry> = {};
     const travelContexts: Record<string, TravelContext> = {};
     const accessContexts: Record<string, AccessContext> = {};
-    for (const condition of canonical.conditions) {
+    const progressTotal = canonical.conditions.length + (canonical.combined ? 2 : 0);
+    for (const [index, condition] of canonical.conditions.entries()) {
+      onProgress?.({
+        completed: index,
+        total: progressTotal,
+        label: `Calculating ${condition.label}`,
+      });
       const result = this.cachedConditionLayer(canonical, condition);
       if (result.layer) layers[condition.id] = result.layer;
       if (result.travel) travelContexts[condition.id] = result.travel;
@@ -329,6 +417,13 @@ export class GeoEngine {
     }
 
     const hasMissingCondition = canonical.conditions.some((condition) => !layers[condition.id]);
+    if (canonical.combined) {
+      onProgress?.({
+        completed: canonical.conditions.length,
+        total: progressTotal,
+        label: 'Intersecting all priorities',
+      });
+    }
     const feasibleRegion =
       canonical.combined && !hasMissingCondition
         ? combineAreas(
@@ -340,10 +435,18 @@ export class GeoEngine {
     const candidates = feasibleRegion
       ? this.rank(canonical, feasibleRegion, travelContexts, accessContexts)
       : [];
+    if (canonical.combined) {
+      onProgress?.({
+        completed: canonical.conditions.length + 1,
+        total: progressTotal,
+        label: 'Ranking geographically distinct options',
+      });
+    }
     const restriction =
       feasibleRegion || canonical.combined
         ? this.restriction(canonical, layers, feasibleRegion)
         : null;
+    onProgress?.({ completed: progressTotal, total: progressTotal, label: 'Analysis complete' });
     return { layers, feasibleRegion, feasibleAreaKm2, candidates, restriction };
   }
 
@@ -452,17 +555,23 @@ export class GeoEngine {
         b.averageSlack - a.averageSlack ||
         a.id.localeCompare(b.id),
     );
+    const feasibleAreaKm2 = area(feasible) / 1_000_000;
+    const preferredSeparation = Math.max(0.55, Math.min(2.2, Math.sqrt(feasibleAreaKm2) * 0.18));
     const selected: Candidate[] = [];
-    for (const candidate of scored) {
-      if (
-        selected.every(
-          (existing) =>
-            distance(point(existing.coordinates), point(candidate.coordinates), {
-              units: 'kilometers',
-            }) >= 0.3,
-        )
-      ) {
-        selected.push(candidate);
+    for (const minimumSeparation of [preferredSeparation, preferredSeparation * 0.65, 0.3]) {
+      for (const candidate of scored) {
+        if (selected.includes(candidate)) continue;
+        if (
+          selected.every(
+            (existing) =>
+              distance(point(existing.coordinates), point(candidate.coordinates), {
+                units: 'kilometers',
+              }) >= minimumSeparation,
+          )
+        ) {
+          selected.push(candidate);
+        }
+        if (selected.length === 3) break;
       }
       if (selected.length === 3) break;
     }

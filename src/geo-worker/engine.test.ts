@@ -6,7 +6,7 @@ import { point } from '@turf/helpers';
 import { featureCollection } from '@turf/helpers';
 import type { AreaGeometry, CanonicalWorkspace } from '../domain/schemas';
 import { GeoEngine } from './engine';
-import { loadGraph, type CompactGraphSpec } from './graph';
+import { loadGraph, type CompactGraphSpec, type SerializedAdjacencyGraph } from './graph';
 
 const graph: CompactGraphSpec = {
   format: 'compact-grid-v1',
@@ -320,5 +320,57 @@ describe('GeoEngine', () => {
     );
 
     expect(result.candidates[0]?.name).toMatch(/^Mission — near Valencia Street & 18th Street$/u);
+  });
+
+  it('rejects a destination snapped to an implausibly disconnected road stub', () => {
+    const nodes = Array.from(
+      { length: 60 },
+      (_, index) => [-122.46 + index * 0.001, 37.75] as [number, number],
+    );
+    nodes.push([-122.385, 37.79], [-122.3845, 37.79]);
+    const adjacency = nodes.map(() => [] as Array<{ target: number; weight: number }>);
+    for (let index = 0; index < 59; index += 1) {
+      adjacency[index]!.push({ target: index + 1, weight: 1 });
+      adjacency[index + 1]!.push({ target: index, weight: 1 });
+    }
+    adjacency[60]!.push({ target: 61, weight: 1 });
+    adjacency[61]!.push({ target: 60, weight: 1 });
+    const offsets = [0];
+    const targets: number[] = [];
+    const weights: number[] = [];
+    for (const edges of adjacency) {
+      for (const edge of edges) {
+        targets.push(edge.target);
+        weights.push(edge.weight);
+      }
+      offsets.push(targets.length);
+    }
+    const disconnectedGraph: SerializedAdjacencyGraph = {
+      format: 'adjacency-v1',
+      nodes,
+      offsets,
+      targets,
+      weights,
+    };
+    const disconnectedWorkspace = workspace();
+    disconnectedWorkspace.destinations = [
+      { id: 'stub', label: 'Side entrance', coordinates: [-122.385, 37.79] },
+    ];
+    disconnectedWorkspace.conditions = [
+      {
+        id: 'stub-trip',
+        kind: 'travel',
+        destinationId: 'stub',
+        mode: 'car',
+        label: '30-minute drive to Side entrance',
+        visible: true,
+        maxMinutes: 30,
+      },
+    ];
+    disconnectedWorkspace.combined = false;
+
+    expect(() =>
+      new GeoEngine(loadGraph(disconnectedGraph), places, boundary).analyze(disconnectedWorkspace),
+    ).toThrow(/disconnected road \(2 reachable nodes\)/u);
   });
 });

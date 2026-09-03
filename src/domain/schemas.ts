@@ -251,7 +251,36 @@ export type WorkspaceShare = z.infer<typeof WorkspaceShareSchema>;
 export type OperationState = 'idle' | 'calculating' | 'drawing' | 'error';
 export type AnalysisFreshness = 'not-combined' | 'fresh' | 'stale';
 
+export interface PlanDestinationInput {
+  key: string;
+  label: string;
+  coordinates: Coordinate;
+}
+
+export type PlanConditionInput =
+  | {
+      kind: 'travel';
+      destinationKey: string;
+      mode: TravelMode;
+      maxMinutes: number;
+    }
+  | {
+      kind: 'access';
+      category: PlaceCategory;
+      mode: AccessMode;
+      maxMinutes: number;
+      groceryType?: 'supermarket' | 'supermarket_or_grocery';
+    };
+
 export type WorkspaceCommand =
+  | {
+      type: 'configure-plan';
+      destinations: PlanDestinationInput[];
+      conditions: PlanConditionInput[];
+      replaceExisting?: boolean;
+      findMatches?: boolean;
+      actor?: ActivityEntry['actor'];
+    }
   | {
       type: 'add-destination';
       destination: Omit<Destination, 'id'> & { id?: string };

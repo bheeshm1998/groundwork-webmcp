@@ -54,6 +54,7 @@ function resultLabel(properties: NonNullable<PhotonFeature['properties']>): stri
 export async function searchOnlineLocations(
   cityId: CityId,
   query: string,
+  signal?: AbortSignal,
 ): Promise<LocationResult[]> {
   const endpoint = import.meta.env.VITE_GEOCODER_URL?.trim() || DEFAULT_GEOCODER_URL;
   const city = CITIES[cityId];
@@ -69,7 +70,9 @@ export async function searchOnlineLocations(
     url.searchParams.set('bbox', `${west},${south},${east},${north}`);
     const response = await fetch(url, {
       headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(GEOCODER_TIMEOUT_MS),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(GEOCODER_TIMEOUT_MS)])
+        : AbortSignal.timeout(GEOCODER_TIMEOUT_MS),
     });
     if (!response.ok) return [];
     const payload = (await response.json()) as PhotonResponse;
