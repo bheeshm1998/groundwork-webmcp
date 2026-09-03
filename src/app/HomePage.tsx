@@ -130,16 +130,6 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="closing-cta">
-        <div>
-          <p className="section-kicker">Designed for decisions, not demos</p>
-          <h2>Your assistant can calculate. You still get the final say.</h2>
-        </div>
-        <a className="primary-link" href={`/app?city=${cityId}`}>
-          Build my shortlist
-        </a>
-      </section>
-
       <footer className="landing-footer">
         <a className="brand brand-dark" href="/" aria-label="SweetSpot home">
           <span className="brand-mark">S</span>
